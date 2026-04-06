@@ -1,0 +1,42 @@
+[
+  {
+    "true_performance": "good",
+    "tracking_reliability": "low",
+    "days_since_launch": 0,
+    "observation": {
+      "impressions": 14000,
+      "link_clicks": 510,
+      "tracked_conversions": 9,
+      "modeled_conversions": 12,
+      "cost_per_result": 9.4,
+      "days_since_launch": 0,
+      "conversion_delay_avg_days": 3.4,
+      "ios_traffic_percent": 57.0,
+      "pixel_match_quality": 0.43,
+      "capi_coverage": 0.39,
+      "attribution_window_days": 7,
+      "historical_account_performance": 0.69,
+      "industry_avg_delay_days": 3.6
+    }
+  },
+  {
+    "true_performance": "bad",
+    "tracking_reliability": "low",
+    "days_since_launch": 0,
+    "observation": {
+      "impressions": 13000,
+      "link_clicks": 350,
+      "tracked_conversions": 4,
+      "modeled_conversions": 10,
+      "cost_per_result": 15.9,
+      "days_since_launch": 0,
+      "conversion_delay_avg_days": 3.1,
+      "ios_traffic_percent": 61.0,
+      "pixel_match_quality": 0.37,
+      "capi_coverage": 0.35,
+      "attribution_window_days": 7,
+      "historical_account_performance": 0.63,
+      "industry_avg_delay_days": 3.5
+    }
+  }
+]

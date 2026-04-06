@@ -1,0 +1,7 @@
+pydantic>=2.6
+openai>=1.0.0
+fastapi>=0.110
+uvicorn>=0.29
+numpy>=1.26
+pandas>=2.2
+gradio>=4.0

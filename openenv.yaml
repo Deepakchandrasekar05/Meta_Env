@@ -1,0 +1,14 @@
+name: meta-ads-attribution-env
+description: RL environment simulating Meta Ads optimization under attribution uncertainty
+version: 1.0
+
+observation_model: meta_ads_env.models.Observation
+action_model: meta_ads_env.models.Action
+reward_model: meta_ads_env.models.Reward
+
+tasks:
+  - easy
+  - medium
+  - hard
+
+entry_point: meta_ads_env.env:MetaAdsEnv
