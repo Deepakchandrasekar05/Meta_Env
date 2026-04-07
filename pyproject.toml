@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meta-ads-attribution-env"
+version = "1.0.0"
+description = "OpenEnv-compatible Meta Ads attribution recovery benchmark"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Meta Ads OpenEnv Team" }
+]
+dependencies = [
+  "pydantic>=2.6",
+  "openai>=1.0.0",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "gradio>=4.0",
+  "openenv-core>=0.2.0"
+]
+
+[project.scripts]
+server = "server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["meta_ads_env*", "baseline*", "evaluation*", "app*"]
