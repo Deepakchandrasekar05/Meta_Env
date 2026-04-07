@@ -1,42 +1,22 @@
 [
   {
-    "true_performance": "good",
-    "tracking_reliability": "low",
-    "days_since_launch": 0,
-    "observation": {
-      "impressions": 14000,
-      "link_clicks": 510,
-      "tracked_conversions": 9,
-      "modeled_conversions": 12,
-      "cost_per_result": 9.4,
-      "days_since_launch": 0,
-      "conversion_delay_avg_days": 3.4,
-      "ios_traffic_percent": 57.0,
-      "pixel_match_quality": 0.43,
-      "capi_coverage": 0.39,
-      "attribution_window_days": 7,
-      "historical_account_performance": 0.69,
-      "industry_avg_delay_days": 3.6
-    }
-  },
-  {
-    "true_performance": "bad",
-    "tracking_reliability": "low",
-    "days_since_launch": 0,
-    "observation": {
-      "impressions": 13000,
-      "link_clicks": 350,
-      "tracked_conversions": 4,
-      "modeled_conversions": 10,
-      "cost_per_result": 15.9,
-      "days_since_launch": 0,
-      "conversion_delay_avg_days": 3.1,
-      "ios_traffic_percent": 61.0,
-      "pixel_match_quality": 0.37,
-      "capi_coverage": 0.35,
-      "attribution_window_days": 7,
-      "historical_account_performance": 0.63,
-      "industry_avg_delay_days": 3.5
-    }
+    "scenario": "iOS-Heavy Apparel Campaign",
+    "problem": "55% of traffic is iOS14+. No Conversions API. No AEM. Pixel signal quality at 33%. Meta is optimising on 1 in 3 actual conversions.",
+    "campaign_id": "camp_medium_001",
+    "true_conversions": 240,
+    "reported_conversions": 62,
+    "attribution_window": "7d_click",
+    "ios_traffic_pct": 0.55,
+    "pixel_signal_quality": 0.325,
+    "conversions_api_enabled": false,
+    "aem_enabled": false,
+    "utm_tracking": false,
+    "budget_usd": 9000,
+    "spend_usd": 8200,
+    "reported_roas": 0.57,
+    "true_roas": 2.20,
+    "optimal_actions": ["enable_conversions_api", "enable_aggregated_event_measurement"],
+    "optimal_params": {},
+    "expected_score_range": [0.60, 0.90]
   }
 ]

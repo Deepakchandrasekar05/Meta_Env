@@ -1,0 +1,125 @@
+Meta Ads Attribution OpenEnv - Build Guide
+=========================================
+
+This guide explains what is currently built in this repository.
+
+Project Goal
+------------
+You now have a production-style reinforcement learning (RL) environment that simulates
+Meta Ads optimization under attribution uncertainty. The environment is designed for
+hackathon/demo use and includes:
+- typed models
+- environment step/reset/state methods
+- easy/medium/hard tasks
+- reward shaping
+- baseline policy
+- grading/evaluation utilities
+- local demo UI
+- deployment-ready config files
+
+Repository Structure
+--------------------
+Root files:
+- openenv.yaml: OpenEnv wiring (models, tasks, entry point).
+- README.md: quickstart and project overview.
+- Dockerfile: container build and run command.
+- requirements.txt: Python dependencies.
+- .env.example: environment variable template.
+- GUIDE.txt: this document.
+
+Core package (meta_ads_env/):
+- __init__.py: package export.
+- models.py: typed Pydantic models for Observation, Action, Reward.
+- env.py: main environment class with reset(), step(), state().
+- simulator.py: transition logic that updates ad metrics day by day.
+- reward.py: reward policy based on action correctness and attribution context.
+- tasks.py: task loader for easy/medium/hard JSON files.
+- grader.py: programmatic episode grading utility.
+- utils.py: helper formatter for observation display.
+
+Task datasets (data/):
+- easy_ads.json
+- medium_ads.json
+- hard_ads.json
+Each file contains realistic ad-account states with observation payloads and hidden labels
+(true_performance and tracking_reliability) used by simulator/reward logic.
+
+Baseline agent (baseline/):
+- baseline_agent.py: heuristic policy for choosing actions.
+- run_baseline.py: executes one full episode and prints total reward + grade.
+
+Evaluation helpers (evaluation/):
+- metrics.py: aggregate metrics (count/mean/min/max) across episodes.
+- llm_grader.py: optional OpenAI-based textual grading for episode summaries.
+
+Demo app (app/):
+- app.py: Gradio interface to run baseline on easy/medium/hard and view trace + reward.
+
+What Works Right Now
+--------------------
+1. Environment API
+   - reset() returns a typed Observation.
+   - step(Action) returns (Observation, Reward, done, info).
+   - state() returns current internal state.
+   - Episode ends when days_since_launch > 14.
+
+2. Typed Contracts
+   - Observation, Action, Reward models enforce schema and value bounds.
+
+3. Task Diversity
+   - Three task difficulties (easy/medium/hard) with different attribution noise and delay profiles.
+
+4. Reward Shaping
+   - Positive reward for correct decisions (promote good ads, reduce bad ads, etc.).
+   - Negative reward for harmful actions.
+   - Partial reward for attribution-aware behavior.
+
+5. Baseline Policy
+   - Rule-based policy that reacts to iOS share, pixel quality, conversions, and launch age.
+
+6. Grading and Evaluation
+   - Programmatic grading in meta_ads_env/grader.py.
+   - Optional LLM feedback in evaluation/llm_grader.py.
+
+7. Demo UI
+   - Gradio app can run full baseline episodes from a dropdown and display episode trace.
+   - Local run defaults to host 127.0.0.1 (browser-friendly).
+   - Deployment can override host/port through env vars.
+
+8. Git + Remote
+   - Repository has an initial commit and main branch is pushed to origin.
+
+How To Run Locally
+------------------
+1. Create/activate virtual environment (if not active).
+2. Install dependencies:
+   pip install -r requirements.txt
+3. Run baseline:
+   python baseline/run_baseline.py
+4. Launch demo app:
+   python app/app.py
+5. Open in browser:
+   http://127.0.0.1:7860
+
+Deployment Notes
+----------------
+- Docker entry command runs the baseline script.
+- For hosted demos (HF Spaces or container runtime), set:
+  - GRADIO_SERVER_NAME=0.0.0.0
+  - GRADIO_SERVER_PORT=7860
+
+Current Limitations / Next Enhancements
+---------------------------------------
+- No training loop yet (currently baseline heuristic only).
+- No automated unit test suite yet.
+- No leaderboard or multi-episode benchmark script yet.
+- LLM grader requires OPENAI_API_KEY to be set.
+
+Suggested Next Build Steps
+--------------------------
+1. Add benchmark runner for N episodes per task with aggregated metrics.
+2. Add tests for task loading, reward branches, and terminal conditions.
+3. Add richer simulator dynamics (budget states, fatigue, auction competition).
+4. Add JSON logging for episode trajectories for auditability.
+
+End of guide.
