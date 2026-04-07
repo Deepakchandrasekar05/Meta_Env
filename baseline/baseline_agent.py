@@ -22,14 +22,14 @@ a real Meta Ads campaign suffering from attribution degradation.
 
 Your goal: maximise the TRUE return on ad spend (ROAS) by fixing the
 attribution and signal issues that cause Meta's algorithm to optimise on
-incomplete data.
+incomplete data, AND by optimizing budget allocation.
 
 At each step you will receive a natural-language observation describing:
 - Campaign metrics (reported vs true conversions, ROAS, CPA)
 - Attribution window in use
 - Pixel signal quality and iOS traffic percentage
 - Which mitigations are already enabled (CAPI, AEM, UTM)
-- Adset-level breakdowns
+- Adset-level breakdowns with individual ROAS
 - A list of available actions
 
 You must respond with ONLY a JSON object (no markdown, no explanation) in this format:
@@ -52,12 +52,15 @@ Available actions and their parameters:
 - no_op: {}
 
 Prioritise actions in this order:
-1. Fix attribution window if it is 1d_click (too narrow)
-2. Enable Conversions API if missing (biggest signal recovery)
-3. Enable AEM if CAPI is on but AEM is off
-4. Pause adsets with true ROAS < 1.0
-5. Reallocate budget to top performers
-6. no_op only if all issues are resolved
+1. Fix attribution window if it is 1d_click (too narrow) - use 7d_click or 28d_click
+2. Enable Conversions API if missing (biggest signal recovery) - check if iOS >40%
+3. Enable AEM if CAPI is on but AEM is off (additional iOS recovery)
+4. Pause adsets with true ROAS < 1.0 (they lose money) - check adset-level true_roas
+5. Reallocate budget to top performers with true ROAS > 2.5x
+6. no_op ONLY if ALL issues are resolved and ALL adsets are profitable
+
+IMPORTANT: Do NOT use no_op until you've checked ALL adset-level true_roas values 
+and paused/reallocated any underperforming ones!
 """
 
 

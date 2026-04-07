@@ -129,6 +129,21 @@ class MetaAdsAttributionEnv:
         rep_c   = c.reported_conversions
         gap_pct = _attribution_gap(c)
 
+        # Build adset breakdown for agent
+        adset_info = []
+        if c.adsets:
+            adset_info.append("\n\nAdset Performance Breakdown:")
+            for adset in c.adsets:
+                status = "PAUSED" if adset.is_paused else "ACTIVE"
+                adset_info.append(
+                    f"  • {adset.adset_name} ({status}): "
+                    f"Spent ${adset.spent:,.0f}/{adset.budget:,.0f} | "
+                    f"Reported ROAS: {adset.reported_roas:.2f}x | "
+                    f"True ROAS: {adset.true_roas:.2f}x | "
+                    f"Segment: {adset.audience_segment}"
+                )
+        adset_context = "\n".join(adset_info)
+
         context = (
             f"Campaign '{c.campaign_name}' | Objective: {c.objective}\n"
             f"Spend: ${c.budget_spent:,.0f} / ${c.total_budget:,.0f}\n"
@@ -141,6 +156,7 @@ class MetaAdsAttributionEnv:
             f"AEM: {'ON' if c.aem_enabled else 'OFF'}  |  "
             f"UTM: {'ON' if c.utm_tracking else 'OFF'}\n"
             f"Reported ROAS: {c.reported_roas:.2f}x  |  True ROAS: {c.true_roas:.2f}x\n"
+            f"{adset_context}\n"
             f"Step {s.step_count}/{s.max_steps}\n"
             f"Issues resolved: {s.issues_resolved}\n"
             f"Issues remaining: {list(set(s.issues_remaining) - set(s.issues_resolved))}"

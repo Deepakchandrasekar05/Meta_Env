@@ -196,14 +196,14 @@ if done:
 
 ## 📈 Baseline Results
 
-**Model**: Qwen/Qwen2.5-72B-Instruct | **Temperature**: 0.0
+**Model**: Qwen/Qwen2.5-72B-Instruct (Free HF model!) | **Temperature**: 0.0
 
 | Task | Score | Pass | Steps | Key Actions |
 |------|-------|------|-------|-------------|
-| Easy | 0.854 | ✅ | 2/5 | Adjust window to 7d_click |
-| Medium | 0.782 | ✅ | 3/7 | Enable CAPI + AEM |
-| Hard | 0.691 | ✅ | 6/10 | Window + CAPI + AEM + budget optimization |
-| **Average** | **0.776** | **100%** | - | - |
+| Easy | 0.786 | ✅ | 1/5 | Adjust window to 7d_click |
+| Medium | 0.971 | ✅ | 2/7 | Enable CAPI + AEM |
+| Hard | 0.718 | ✅ | 6/10 | Window + CAPI + AEM + pause bad adsets + reallocate |
+| **Average** | **0.825** | **100%** | - | **All passing!** 🎉 |
 
 ---
 

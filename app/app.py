@@ -13,27 +13,55 @@ from baseline.baseline_agent import BaselineAgent
 from meta_ads_env import MetaAdsAttributionEnv
 
 
+def _load_env_file(env_path: Path) -> None:
+    if not env_path.exists():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key and os.getenv(key) is None:
+            os.environ[key] = value
+
+
 def run_demo(task_id: str) -> tuple[str, float]:
-    env = MetaAdsAttributionEnv(task_id=task_id)
-    agent = BaselineAgent()
-    obs = env.reset()
+    _load_env_file(ROOT / ".env")
+
+    try:
+        env = MetaAdsAttributionEnv(task_id=task_id)
+        agent = BaselineAgent()
+        obs = env.reset()
+    except Exception as exc:
+        return (
+            "Unable to start demo. Ensure .env contains HF_TOKEN, API_BASE_URL, and MODEL_NAME. "
+            f"Details: {exc}",
+            0.0,
+        )
 
     total_reward = 0.0
     trace: list[str] = []
     step = 0
 
-    while not obs.done:
-        action = agent.act(obs.context)
-        obs, reward, done, info = env.step(action)
-        step += 1
+    try:
+        while not obs.done:
+            action = agent.act(obs.context)
+            obs, reward, done, info = env.step(action)
+            step += 1
 
-        total_reward += reward.total
-        trace.append(
-            f"step={step} action={action.action_type} "
-            f"reward={reward.total:+.2f} effects={info.get('effects', [])}"
-        )
-        if done:
-            break
+            total_reward += reward.total
+            trace.append(
+                f"step={step} action={action.action_type} "
+                f"reward={reward.total:+.2f} effects={info.get('effects', [])}"
+            )
+            if done:
+                break
+    except Exception as exc:
+        trace.append(f"runtime_error={exc}")
 
     return "\n".join(trace), total_reward
 
