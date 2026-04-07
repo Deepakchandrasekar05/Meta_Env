@@ -85,11 +85,12 @@ def run_task(task_id: str, agent: BaselineAgent, verbose: bool = True) -> dict:
 
 
 def main():
+    model_name = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
     print("Meta Ads Attribution OpenEnv — Baseline Evaluation")
-    print("Model: gpt-4o-mini  |  Tasks: 3\n")
+    print(f"Model: {model_name}  |  Tasks: 3\n")
 
     try:
-        agent = BaselineAgent(model="gpt-4o-mini")
+        agent = BaselineAgent(model=model_name)
     except EnvironmentError as e:
         print(f"ERROR: {e}")
         sys.exit(1)

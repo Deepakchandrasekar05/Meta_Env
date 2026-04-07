@@ -22,11 +22,34 @@ from meta_ads_env.tasks import TASK_REGISTRY
 
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
-API_KEY = os.getenv("HF_TOKEN")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
 BENCHMARK = "meta_ads_attribution_openenv"
 MAX_TOKENS = 300
 TEMPERATURE = 0.0
+
+VALID_ACTIONS = {
+    "adjust_attribution_window",
+    "enable_conversions_api",
+    "adjust_budget_allocation",
+    "change_bid_strategy",
+    "add_utm_tracking",
+    "segment_audience",
+    "enable_aggregated_event_measurement",
+    "pause_underperforming_adsets",
+    "reallocate_to_top_performers",
+    "no_op",
+}
+
+ACTION_ALIASES = {
+    "extend_attribution_window": "adjust_attribution_window",
+    "set_attribution_window": "adjust_attribution_window",
+    "update_attribution_window": "adjust_attribution_window",
+    "enable_aem": "enable_aggregated_event_measurement",
+    "enable_aggregated_event_measure": "enable_aggregated_event_measurement",
+    "pause_underperforming": "pause_underperforming_adsets",
+    "reallocate_budget_to_top_performers": "reallocate_to_top_performers",
+}
 
 SYSTEM_PROMPT = """
 You are an expert Meta Ads strategist and data analyst.
@@ -78,11 +101,28 @@ def _parse_action(raw: str) -> Action:
     except json.JSONDecodeError:
         return Action(action_type="no_op", parameters={}, reasoning="parse_error")
 
-    return Action(
-        action_type=payload.get("action_type", "no_op"),
-        parameters=payload.get("parameters", {}),
-        reasoning=payload.get("reasoning", ""),
-    )
+    action_type = str(payload.get("action_type", "no_op")).strip()
+    action_type = ACTION_ALIASES.get(action_type, action_type)
+
+    if action_type not in VALID_ACTIONS:
+        action_type = "no_op"
+
+    parameters = payload.get("parameters", {})
+    if not isinstance(parameters, dict):
+        parameters = {}
+
+    reasoning = payload.get("reasoning", "")
+    if reasoning is None:
+        reasoning = ""
+
+    try:
+        return Action(
+            action_type=action_type,
+            parameters=parameters,
+            reasoning=str(reasoning),
+        )
+    except Exception:
+        return Action(action_type="no_op", parameters={}, reasoning="validation_error")
 
 
 def _infer_next_action(client: OpenAI, model: str, observation_context: str) -> Action:
@@ -150,7 +190,7 @@ def run_task(client: OpenAI, task_id: str) -> int:
 def main() -> int:
     if not API_KEY:
         # Keep behavior explicit for validators/users.
-        raise EnvironmentError("HF_TOKEN is required for inference")
+        raise EnvironmentError("HF_TOKEN (or OPENAI_API_KEY/API_KEY) is required for inference")
 
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 

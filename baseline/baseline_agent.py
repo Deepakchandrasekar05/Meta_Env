@@ -62,12 +62,14 @@ Prioritise actions in this order:
 
 
 class BaselineAgent:
-    def __init__(self, model: str = "gpt-4o-mini"):
-        api_key = os.environ.get("OPENAI_API_KEY")
+    def __init__(self, model: str | None = None):
+        api_key = os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            raise EnvironmentError("OPENAI_API_KEY not set")
-        self.client = OpenAI(api_key=api_key)
-        self.model  = model
+            raise EnvironmentError("HF_TOKEN (or OPENAI_API_KEY) not set")
+
+        base_url = os.environ.get("API_BASE_URL")
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.model = model or os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 
     def act(self, observation_context: str) -> Action:
         """Given the natural-language observation, return an Action."""

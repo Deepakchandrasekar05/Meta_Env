@@ -196,7 +196,7 @@ if done:
 
 ## 📈 Baseline Results
 
-**Model**: GPT-4o-mini | **Temperature**: 0.0
+**Model**: Qwen/Qwen2.5-72B-Instruct | **Temperature**: 0.0
 
 | Task | Score | Pass | Steps | Key Actions |
 |------|-------|------|-------|-------------|
@@ -251,7 +251,7 @@ The hackathon requires `inference.py` in the repository root.
 **Set environment variables:**
 ```bash
 export API_BASE_URL=https://api.openai.com/v1
-export MODEL_NAME=gpt-4o-mini
+export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
 export HF_TOKEN=your_hf_token  # Optional, for HF models
 export OPENAI_API_KEY=sk-your-key-here
 ```
