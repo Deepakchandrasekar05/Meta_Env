@@ -7,8 +7,8 @@ action_model: meta_ads_env.models.Action
 reward_model: meta_ads_env.models.Reward
 
 tasks:
-  - easy
-  - medium
-  - hard
+  - easy_attribution_window
+  - medium_pixel_recovery
+  - hard_full_attribution_audit
 
-entry_point: meta_ads_env.env:MetaAdsEnv
+entry_point: meta_ads_env.env:MetaAdsAttributionEnv

@@ -5,4 +5,4 @@ COPY . .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-CMD ["python", "baseline/run_baseline.py"]
+CMD ["python", "inference.py"]

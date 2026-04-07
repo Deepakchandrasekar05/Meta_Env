@@ -31,16 +31,48 @@ python baseline/run_baseline.py
 python app/app.py
 ```
 
+## Submission Inference (Required)
+
+The required submission script is [inference.py](inference.py) in the repository root.
+
+Set these environment variables before running it:
+
+- `API_BASE_URL` (LLM API endpoint)
+- `MODEL_NAME` (model identifier)
+- `HF_TOKEN` (API key)
+
+Run:
+
+```bash
+python inference.py
+```
+
+The script emits strict structured stdout logs in this format:
+
+- `[START] ...`
+- `[STEP] ...`
+- `[END] ...`
+
+And runs all three tasks end-to-end.
+
+## Pre-Submission Validator
+
+Use the included validator:
+
+```bash
+bash scripts/validate-submission.sh <your_space_url> .
+```
+
 ## OpenEnv Config
 
 Environment wiring is defined in `openenv.yaml`:
 - Observation model: `meta_ads_env.models.Observation`
 - Action model: `meta_ads_env.models.Action`
 - Reward model: `meta_ads_env.models.Reward`
-- Entry point: `meta_ads_env.env:MetaAdsEnv`
+- Entry point: `meta_ads_env.env:MetaAdsAttributionEnv`
 
 ## Task Levels
 
-- `easy`: cleaner signal, lower attribution noise.
-- `medium`: mixed signal and moderate delay.
-- `hard`: high attribution ambiguity and delayed conversion patterns.
+- `easy_attribution_window`
+- `medium_pixel_recovery`
+- `hard_full_attribution_audit`
