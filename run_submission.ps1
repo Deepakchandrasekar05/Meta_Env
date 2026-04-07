@@ -1,27 +1,25 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification='No custom functions are declared in this script.')]
+param()
+
 $ErrorActionPreference = "Stop"
 
-function Load-DotEnv {
-    param([string]$Path = ".env")
-
-    if (-not (Test-Path $Path)) {
-        throw "Missing $Path file in project root."
-    }
-
-    Get-Content $Path | ForEach-Object {
-        $line = $_.Trim()
-        if ([string]::IsNullOrWhiteSpace($line)) { return }
-        if ($line.StartsWith("#")) { return }
-
-        $parts = $line -split '=', 2
-        if ($parts.Count -ne 2) { return }
-
-        $name = $parts[0].Trim()
-        $value = $parts[1].Trim()
-        [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
-    }
+$envPath = ".env"
+if (-not (Test-Path $envPath)) {
+    throw "Missing $envPath file in project root."
 }
 
-Load-DotEnv ".env"
+Get-Content $envPath | ForEach-Object {
+    $line = $_.Trim()
+    if ([string]::IsNullOrWhiteSpace($line)) { return }
+    if ($line.StartsWith("#")) { return }
+
+    $parts = $line -split '=', 2
+    if ($parts.Count -ne 2) { return }
+
+    $name = $parts[0].Trim()
+    $value = $parts[1].Trim()
+    [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
+}
 
 if (-not $env:HF_TOKEN) {
     throw "HF_TOKEN is missing. Add it to .env"
