@@ -10,33 +10,47 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from baseline.baseline_agent import BaselineAgent
-from meta_ads_env.env import MetaAdsEnv
-from meta_ads_env.models import Action
+from meta_ads_env import MetaAdsAttributionEnv
 
 
-def run_demo(task_name: str) -> tuple[str, float]:
-    env = MetaAdsEnv(task_name=task_name)
+def run_demo(task_id: str) -> tuple[str, float]:
+    env = MetaAdsAttributionEnv(task_id=task_id)
     agent = BaselineAgent()
     obs = env.reset()
 
-    done = False
     total_reward = 0.0
     trace: list[str] = []
+    step = 0
 
-    while not done:
-        action = agent.act(obs)
-        obs, reward, done, _ = env.step(Action(action=action))
-        total_reward += reward.reward
-        trace.append(f"day={obs.days_since_launch} action={action} reward={reward.reward:+.2f}")
+    while not obs.done:
+        action = agent.act(obs.context)
+        obs, reward, done, info = env.step(action)
+        step += 1
+
+        total_reward += reward.total
+        trace.append(
+            f"step={step} action={action.action_type} "
+            f"reward={reward.total:+.2f} effects={info.get('effects', [])}"
+        )
+        if done:
+            break
 
     return "\n".join(trace), total_reward
 
 
 with gr.Blocks(title="Meta Ads Attribution RL Demo") as demo:
     gr.Markdown("# Meta Ads Attribution OpenEnv Demo")
-    gr.Markdown("Run a baseline policy across easy/medium/hard simulated attribution tasks.")
+    gr.Markdown("Run a baseline policy across all attribution tasks.")
 
-    task = gr.Dropdown(choices=["easy", "medium", "hard"], value="easy", label="Task")
+    task = gr.Dropdown(
+        choices=[
+            "easy_attribution_window",
+            "medium_pixel_recovery",
+            "hard_full_attribution_audit",
+        ],
+        value="easy_attribution_window",
+        label="Task",
+    )
     run = gr.Button("Run Baseline Episode")
     trace_output = gr.Textbox(label="Episode Trace", lines=12)
     reward_output = gr.Number(label="Total Reward")
