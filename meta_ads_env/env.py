@@ -12,13 +12,17 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from meta_ads_env.models import Action, EnvState, Observation, Reward
-from meta_ads_env.simulator import SimulationEngine, _attribution_gap
+from meta_ads_env.simulator import SimulationEngine, WINDOW_COVERAGE, _attribution_gap
 from meta_ads_env.tasks import TASK_REGISTRY, get_task
 from meta_ads_env.grader import grade, TaskResult
 
 AVG_ORDER_VALUE = 75.0
 
 AVAILABLE_ACTIONS: List[str] = [
+    "investigate_attribution",
+    "switch_to_modeled_conversions",
+    "promote_ad",
+    "reduce_budget",
     "adjust_attribution_window",
     "enable_conversions_api",
     "adjust_budget_allocation",
@@ -64,7 +68,7 @@ class MetaAdsAttributionEnv:
         self._state = get_task(self.task_id)
         c = self._state.campaign
         self._initial_gap      = _attribution_gap(c)
-        self._initial_signal   = c.pixel_signal_quality
+        self._initial_signal   = self._state.tracking_reliability
         self._initial_true_roas = c.true_roas
         return self._build_observation()
 
@@ -128,6 +132,11 @@ class MetaAdsAttributionEnv:
         true_c  = c.true_conversions
         rep_c   = c.reported_conversions
         gap_pct = _attribution_gap(c)
+        observed_factor = max(
+            WINDOW_COVERAGE.get(c.attribution_window, 0.72) * max(s.tracking_reliability, 0.10),
+            0.10,
+        )
+        inferred_true = int(rep_c / observed_factor)
 
         # Build adset breakdown for agent
         adset_info = []
@@ -146,15 +155,30 @@ class MetaAdsAttributionEnv:
 
         context = (
             f"Campaign '{c.campaign_name}' | Objective: {c.objective}\n"
+            f"Simulation day: {s.day}\n"
             f"Spend: ${c.budget_spent:,.0f} / ${c.total_budget:,.0f}\n"
-            f"Reported conversions: {rep_c} | Estimated true conversions: {true_c}\n"
+            f"Reported conversions: {rep_c} | Estimated true conversions: {inferred_true}\n"
             f"Attribution gap: {gap_pct:.1%} of conversions are UNTRACKED\n"
             f"Attribution window: {c.attribution_window}\n"
             f"Pixel signal quality: {c.pixel_signal_quality:.0%}  "
             f"(iOS traffic: {c.ios_traffic_pct:.0%})\n"
+            f"Server-side signal quality: {c.server_signal_quality:.0%}\n"
+            f"Tracking reliability (observability): {s.tracking_reliability:.0%}\n"
+            f"State confidence score: {s.confidence_score:.0%}\n"
+            f"Tracking investigated: {'YES' if s.tracking_investigated else 'NO'} | "
+            f"Uncertainty reintroduced: {'YES' if s.uncertainty_reintroduced else 'NO'}\n"
             f"Conversions API: {'ON' if c.conversions_api_enabled else 'OFF'}  |  "
             f"AEM: {'ON' if c.aem_enabled else 'OFF'}  |  "
             f"UTM: {'ON' if c.utm_tracking else 'OFF'}\n"
+            f"Reporting mode: {c.attribution_reporting_mode}\n"
+            f"Pending delayed conversions: {len(s.pending_delayed_conversions)} events\n"
+            f"Delayed conversions released this step: {s.delayed_conversion_release_last_step}\n"
+            f"Cumulative delayed conversions: {s.delayed_true_conversions_total}\n"
+            f"Tracked conversions accumulated: {s.tracked_conversions_total}\n"
+            f"Modeled conversions accumulated: {s.modeled_conversions_total}\n"
+            f"Delayed reward buffer: {s.delayed_reward_buffer:.3f} | Released this step: {s.delayed_reward_released_last_step:.3f}\n"
+            f"Terminal bonus (last): {s.terminal_bonus_last_step:.3f}\n"
+            f"Recent risk events: {s.risk_events[-3:] if s.risk_events else []}\n"
             f"Reported ROAS: {c.reported_roas:.2f}x  |  True ROAS: {c.true_roas:.2f}x\n"
             f"{adset_context}\n"
             f"Step {s.step_count}/{s.max_steps}\n"
@@ -169,13 +193,19 @@ class MetaAdsAttributionEnv:
             max_steps=s.max_steps,
             campaign_data=c,
             reported_conversions=rep_c,
-            estimated_true_conversions=true_c,
+            estimated_true_conversions=inferred_true,
             attribution_gap_pct=round(gap_pct, 4),
             pixel_signal_quality=c.pixel_signal_quality,
             ios_traffic_pct=c.ios_traffic_pct,
             budget_remaining=c.total_budget - c.budget_spent,
             roas_reported=c.reported_roas,
             roas_true=c.true_roas,
+            pending_delayed_conversions=len(s.pending_delayed_conversions),
+            modeled_conversions_accumulated=s.modeled_conversions_total,
+            tracked_conversions_accumulated=s.tracked_conversions_total,
+            delayed_conversion_release_events=s.delayed_conversion_release_last_step,
+            cumulative_delayed_conversions=s.delayed_true_conversions_total,
+            issues_resolved_count=len(set(s.issues_resolved)),
             available_actions=AVAILABLE_ACTIONS,
             context=context,
             done=s.done,
@@ -187,6 +217,10 @@ class MetaAdsAttributionEnv:
             "type": "discrete+params",
             "actions": AVAILABLE_ACTIONS,
             "parameters": {
+                "promote_ad": {},
+                "reduce_budget": {"scale": "float (0.60-0.98)"},
+                "investigate_attribution": {},
+                "switch_to_modeled_conversions": {},
                 "adjust_attribution_window": {"window": ["1d_click", "7d_click", "7d_click_1d_view", "28d_click", "1d_view"]},
                 "adjust_budget_allocation":  {"shifts": "dict[adset_id, new_budget_usd]"},
                 "change_bid_strategy":       {"strategy": ["lowest_cost", "cost_cap", "bid_cap", "value_optimisation"]},

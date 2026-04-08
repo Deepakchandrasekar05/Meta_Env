@@ -53,6 +53,14 @@ def run_task(task_id: str, agent: BaselineAgent, verbose: bool = True) -> dict:
         if verbose:
             print(f"           Reward: {reward.total:.4f}  ({reward.explanation})")
             print(f"           Effects: {info['effects']}")
+            print(
+                "           Delay Stats: "
+                f"pending={obs.pending_delayed_conversions} "
+                f"released_step={obs.delayed_conversion_release_events} "
+                f"cumulative={obs.cumulative_delayed_conversions} "
+                f"tracked={obs.tracked_conversions_accumulated} "
+                f"modeled={obs.modeled_conversions_accumulated}"
+            )
 
         step += 1
         if done:

@@ -47,7 +47,19 @@ class CampaignData(BaseModel):
     conversions_api_enabled: bool
     aem_enabled: bool               # Aggregated Event Measurement
     utm_tracking: bool
-    adsets: List[AdSetMetrics] = []
+    modeled_conversions_enabled: bool = False
+    attribution_reporting_mode: Literal["observed", "modeled"] = "observed"
+    server_signal_quality: float = 0.0
+    adsets: List[AdSetMetrics] = Field(default_factory=list)
+
+
+class PendingConversion(BaseModel):
+    source_adset_id: str
+    clicks: int
+    expected_conversions: int
+    value: int = 0
+    delay_days_remaining: int
+    original_delay_days: int
 
 
 # ─────────────────────────────────────────────────────────────
@@ -68,6 +80,12 @@ class Observation(BaseModel):
     budget_remaining: float
     roas_reported: float
     roas_true: float
+    pending_delayed_conversions: int = 0
+    modeled_conversions_accumulated: int = 0
+    tracked_conversions_accumulated: int = 0
+    delayed_conversion_release_events: int = 0
+    cumulative_delayed_conversions: int = 0
+    issues_resolved_count: int = 0
     available_actions: List[str]
     context: str                    # natural-language summary for LLM agents
     done: bool = False
@@ -95,6 +113,10 @@ class Observation(BaseModel):
 # ─────────────────────────────────────────────────────────────
 
 ActionType = Literal[
+    "promote_ad",
+    "reduce_budget",
+    "investigate_attribution",
+    "switch_to_modeled_conversions",
     "adjust_attribution_window",
     "enable_conversions_api",
     "adjust_budget_allocation",
@@ -136,10 +158,15 @@ class RewardComponents(BaseModel):
     signal_quality_gain:  float = 0.0   # 0–0.25
     action_validity:      float = 0.0   # 0–0.10  correct action for context
     step_efficiency:      float = 0.0   # 0–0.05  bonus for fewer steps
+    timing_quality:       float = 0.0   # decision timing under delayed feedback
+    uncertainty_handling: float = 0.0   # investigation / modeled use when needed
+    redundancy_penalty:   float = 0.0   # repeated or low-value action penalty
+    long_term_gain:       float = 0.0   # forward trajectory quality
+    issue_resolution_progress: float = 0.0  # progress toward full issue closure
 
 
 class Reward(BaseModel):
-    total: float = Field(ge=0.0, le=1.0)
+    total: float = Field(ge=-1.0, le=1.0)
     components: RewardComponents
     explanation: str = ""
 
@@ -159,3 +186,37 @@ class EnvState(BaseModel):
     history: List[Dict[str, Any]] = Field(default_factory=list)
     issues_resolved: List[str] = Field(default_factory=list)
     issues_remaining: List[str] = Field(default_factory=list)
+    day: int = 0
+    action_counts: Dict[str, int] = Field(default_factory=dict)
+    pending_delayed_conversions: List[PendingConversion] = Field(default_factory=list)
+    pending_conversions: List[PendingConversion] = Field(default_factory=list)
+    hidden_delayed_conversions: List[PendingConversion] = Field(default_factory=list)
+    delayed_true_conversions_total: int = 0
+    delayed_reported_conversions_total: int = 0
+    tracked_conversions_total: int = 0
+    modeled_conversions_total: int = 0
+    growth_momentum: float = 1.0
+    tracking_reliability: float = 0.5
+    attribution_investigation_level: float = 0.0
+    attribution_gap_history: List[float] = Field(default_factory=list)
+    roas_history: List[float] = Field(default_factory=list)
+    signal_quality_history: List[float] = Field(default_factory=list)
+    optimal_steps_hint: int = 4
+    scenario_delay_range: List[int] = Field(default_factory=lambda: [2, 7])
+    tracking_investigated: bool = False
+    uncertainty_reintroduced: bool = False
+    hidden_conversions_pool: int = 0
+    delayed_conversion_release_last_step: int = 0
+    tracked_conversion_release_last_step: int = 0
+    modeled_conversion_release_last_step: int = 0
+    convergence_reached: bool = False
+    conversion_rate_range: List[float] = Field(default_factory=lambda: [0.08, 0.12])
+    max_generated_conversions_per_step: int = 35
+    max_released_conversions_per_step: int = 35
+    target_true_conversions: int = 250
+    delayed_reward_buffer: float = 0.0
+    delayed_reward_released_last_step: float = 0.0
+    terminal_bonus_last_step: float = 0.0
+    risk_events: List[str] = Field(default_factory=list)
+    budget_optimization_multiplier: float = 1.0
+    confidence_score: float = 0.5

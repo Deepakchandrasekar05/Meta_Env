@@ -8,16 +8,45 @@ Three tasks, each returning an EnvState ready for reset():
 """
 
 from __future__ import annotations
+import random
 from typing import Dict
 
-from meta_ads_env.models import AdSetMetrics, CampaignData, EnvState
+from meta_ads_env.models import AdSetMetrics, CampaignData, EnvState, PendingConversion
 from meta_ads_env.simulator import (
     compute_pixel_quality,
     compute_reported_conversions,
+    compute_server_signal_quality,
+    compute_tracking_reliability,
     compute_roas,
 )
 
 AVG_ORDER_VALUE = 75.0   # USD; used consistently across all tasks
+
+
+def _build_hidden_delayed_events(total_hidden: int, adset_ids: list[str], min_delay: int = 2, max_delay: int = 7) -> list[PendingConversion]:
+    if total_hidden <= 0 or not adset_ids:
+        return []
+    span = max(max_delay - min_delay + 1, 1)
+    events: list[PendingConversion] = []
+    remaining = total_hidden
+    bucket_idx = 0
+    while remaining > 0:
+        delay = min_delay + (bucket_idx % span)
+        adset_id = adset_ids[bucket_idx % len(adset_ids)]
+        chunk = min(remaining, max(3, total_hidden // (span * 2)))
+        events.append(
+            PendingConversion(
+                source_adset_id=adset_id,
+                clicks=chunk,
+                expected_conversions=chunk,
+                value=chunk,
+                delay_days_remaining=0,
+                original_delay_days=delay,
+            )
+        )
+        remaining -= chunk
+        bucket_idx += 1
+    return events
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -27,8 +56,10 @@ AVG_ORDER_VALUE = 75.0   # USD; used consistently across all tasks
 # ─────────────────────────────────────────────────────────────────────────────
 
 def make_easy_task() -> EnvState:
+    rng = random.Random()
+    ios_pct = min(max(0.25 + rng.uniform(-0.025, 0.025), 0.15), 0.40)
     pixel_quality = compute_pixel_quality(
-        ios_traffic_pct=0.25,   # moderate iOS share
+        ios_traffic_pct=ios_pct,   # moderate iOS share
         conversions_api=False,
         aem_enabled=False,
         utm_tracking=True,      # UTM at least works
@@ -36,6 +67,8 @@ def make_easy_task() -> EnvState:
     true_conv = 180
     attr_window = "1d_click"
     reported_conv = compute_reported_conversions(true_conv, attr_window, pixel_quality)
+    severity = min(max(rng.uniform(0.92, 1.08), 0.85), 1.15)
+    reported_conv = max(int(round(reported_conv * (2.0 - severity))), 1)
     spend = 4500.0
 
     campaign = CampaignData(
@@ -54,10 +87,13 @@ def make_easy_task() -> EnvState:
         true_roas=compute_roas(true_conv, AVG_ORDER_VALUE, spend),
         attribution_window=attr_window,
         pixel_signal_quality=pixel_quality,
-        ios_traffic_pct=0.25,
+        ios_traffic_pct=ios_pct,
         conversions_api_enabled=False,
         aem_enabled=False,
         utm_tracking=True,
+        modeled_conversions_enabled=False,
+        attribution_reporting_mode="observed",
+        server_signal_quality=compute_server_signal_quality(False, False, True),
         adsets=[
             AdSetMetrics(
                 adset_id="adset_retargeting",
@@ -92,14 +128,39 @@ def make_easy_task() -> EnvState:
         ],
     )
 
+    tracking_rel = max(compute_tracking_reliability(campaign, investigation_level=0.0), 0.68)
+
     return EnvState(
         task_id="easy_attribution_window",
         difficulty="easy",
         step_count=0,
         max_steps=5,
         campaign=campaign,
-        issues_remaining=["attribution_window"],
+        issues_remaining=[
+            "attribution_window",
+            "tracking_investigated",
+        ],
         issues_resolved=[],
+        day=0,
+        growth_momentum=1.05,
+        tracking_reliability=tracking_rel,
+        attribution_investigation_level=0.0,
+        optimal_steps_hint=3,
+        scenario_delay_range=[2, 3],
+        hidden_conversions_pool=max(true_conv - reported_conv, 0),
+        conversion_rate_range=[0.08, 0.12],
+        max_generated_conversions_per_step=34,
+        max_released_conversions_per_step=40,
+        target_true_conversions=260,
+        hidden_delayed_conversions=_build_hidden_delayed_events(
+            max(true_conv - reported_conv, 0),
+            [a.adset_id for a in campaign.adsets],
+            2,
+            7,
+        ),
+        attribution_gap_history=[(true_conv - reported_conv) / true_conv],
+        roas_history=[campaign.reported_roas],
+        signal_quality_history=[tracking_rel],
     )
 
 
@@ -110,7 +171,8 @@ def make_easy_task() -> EnvState:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def make_medium_task() -> EnvState:
-    ios_pct = 0.55
+    rng = random.Random()
+    ios_pct = min(max(0.55 + rng.uniform(-0.05, 0.05), 0.40), 0.70)
     pixel_quality = compute_pixel_quality(
         ios_traffic_pct=ios_pct,
         conversions_api=False,
@@ -120,6 +182,8 @@ def make_medium_task() -> EnvState:
     true_conv = 240
     attr_window = "7d_click"
     reported_conv = compute_reported_conversions(true_conv, attr_window, pixel_quality)
+    severity = min(max(rng.uniform(0.90, 1.10), 0.82), 1.18)
+    reported_conv = max(int(round(reported_conv * (2.0 - severity))), 1)
     spend = 8_200.0
 
     campaign = CampaignData(
@@ -142,6 +206,9 @@ def make_medium_task() -> EnvState:
         conversions_api_enabled=False,
         aem_enabled=False,
         utm_tracking=False,
+        modeled_conversions_enabled=False,
+        attribution_reporting_mode="observed",
+        server_signal_quality=compute_server_signal_quality(False, False, False),
         adsets=[
             AdSetMetrics(
                 adset_id="adset_retargeting",
@@ -179,14 +246,41 @@ def make_medium_task() -> EnvState:
         ],
     )
 
+    tracking_rel = compute_tracking_reliability(campaign, investigation_level=0.0)
+
     return EnvState(
         task_id="medium_pixel_recovery",
         difficulty="medium",
         step_count=0,
         max_steps=7,
         campaign=campaign,
-        issues_remaining=["conversions_api", "aem"],
+        issues_remaining=[
+            "conversions_api",
+            "aem",
+            "tracking_investigated",
+            "modeled_reporting",
+        ],
         issues_resolved=[],
+        day=0,
+        growth_momentum=1.0,
+        tracking_reliability=tracking_rel,
+        attribution_investigation_level=0.0,
+        optimal_steps_hint=4,
+        scenario_delay_range=[2, 5],
+        hidden_conversions_pool=max(true_conv - reported_conv, 0),
+        conversion_rate_range=[0.08, 0.12],
+        max_generated_conversions_per_step=34,
+        max_released_conversions_per_step=32,
+        target_true_conversions=340,
+        hidden_delayed_conversions=_build_hidden_delayed_events(
+            max(true_conv - reported_conv, 0),
+            [a.adset_id for a in campaign.adsets],
+            2,
+            7,
+        ),
+        attribution_gap_history=[(true_conv - reported_conv) / true_conv],
+        roas_history=[campaign.reported_roas],
+        signal_quality_history=[tracking_rel],
     )
 
 
@@ -197,7 +291,8 @@ def make_medium_task() -> EnvState:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def make_hard_task() -> EnvState:
-    ios_pct = 0.60
+    rng = random.Random()
+    ios_pct = min(max(0.60 + rng.uniform(-0.06, 0.06), 0.45), 0.78)
     pixel_quality = compute_pixel_quality(
         ios_traffic_pct=ios_pct,
         conversions_api=False,
@@ -207,6 +302,8 @@ def make_hard_task() -> EnvState:
     true_conv = 310
     attr_window = "1d_click"
     reported_conv = compute_reported_conversions(true_conv, attr_window, pixel_quality)
+    severity = min(max(rng.uniform(0.88, 1.14), 0.78), 1.24)
+    reported_conv = max(int(round(reported_conv * (2.0 - severity))), 1)
     spend = 14_500.0
 
     campaign = CampaignData(
@@ -229,6 +326,9 @@ def make_hard_task() -> EnvState:
         conversions_api_enabled=False,
         aem_enabled=False,
         utm_tracking=False,
+        modeled_conversions_enabled=False,
+        attribution_reporting_mode="observed",
+        server_signal_quality=compute_server_signal_quality(False, False, False),
         adsets=[
             AdSetMetrics(
                 adset_id="adset_retargeting",
@@ -277,6 +377,8 @@ def make_hard_task() -> EnvState:
         ],
     )
 
+    tracking_rel = compute_tracking_reliability(campaign, investigation_level=0.0)
+
     return EnvState(
         task_id="hard_full_attribution_audit",
         difficulty="hard",
@@ -289,8 +391,30 @@ def make_hard_task() -> EnvState:
             "aem",
             "budget_allocation",
             "paused_bad_adsets",
+            "tracking_investigated",
+            "modeled_reporting",
         ],
         issues_resolved=[],
+        day=0,
+        growth_momentum=0.92,
+        tracking_reliability=tracking_rel,
+        attribution_investigation_level=0.0,
+        optimal_steps_hint=6,
+        scenario_delay_range=[3, 7],
+        hidden_conversions_pool=max(true_conv - reported_conv, 0),
+        conversion_rate_range=[0.08, 0.12],
+        max_generated_conversions_per_step=48,
+        max_released_conversions_per_step=36,
+        target_true_conversions=470,
+        hidden_delayed_conversions=_build_hidden_delayed_events(
+            max(true_conv - reported_conv, 0),
+            [a.adset_id for a in campaign.adsets],
+            2,
+            7,
+        ),
+        attribution_gap_history=[(true_conv - reported_conv) / true_conv],
+        roas_history=[campaign.reported_roas],
+        signal_quality_history=[tracking_rel],
     )
 
 
