@@ -22,15 +22,20 @@ from meta_ads_env.models import Action
 from meta_ads_env.tasks import TASK_REGISTRY
 
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL")
+MODEL_NAME = os.getenv("MODEL_NAME")
+API_KEY = os.getenv("HF_TOKEN")
+REQUIRED_MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 BENCHMARK = "meta_ads_attribution_openenv"
 MAX_TOKENS = 300
 TEMPERATURE = 0.0
 MAX_REALLOCATIONS_PER_EPISODE = 1
 
 VALID_ACTIONS = {
+    "investigate_attribution",
+    "switch_to_modeled_conversions",
+    "promote_ad",
+    "reduce_budget",
     "adjust_attribution_window",
     "enable_conversions_api",
     "adjust_budget_allocation",
@@ -57,12 +62,14 @@ SYSTEM_PROMPT = """
 You are an expert Meta Ads strategist. Analyze the campaign data and choose the BEST action.
 
 Priority order:
-1. If attribution_window is "1d_click" → adjust_attribution_window with {"window": "7d_click"}
-2. If Conversions API is OFF and iOS traffic >30% → enable_conversions_api
-3. If CAPI is ON but AEM is OFF → enable_aggregated_event_measurement
-4. If any adset has true_roas < 1.0 → pause_underperforming_adsets with {"roas_threshold": 1.0}
-5. If top adset has true_roas > 2.0 → reallocate_to_top_performers with {"amount": 2000}
-6. Only no_op if ALL issues are fixed
+1. If tracking reliability is weak or issues remain unclear, investigate_attribution first.
+2. If attribution_window is "1d_click" → adjust_attribution_window with {"window": "7d_click"}.
+3. If Conversions API is OFF and iOS traffic >30% → enable_conversions_api.
+4. If CAPI is ON but AEM is OFF → enable_aggregated_event_measurement.
+5. If delayed signals remain high and reporting is observed-only → switch_to_modeled_conversions.
+6. If any active adset has true_roas < 1.0 → pause_underperforming_adsets with {"roas_threshold": 1.0}.
+7. If tracking + attribution are stable and top adset has high true_roas → one controlled reallocate_to_top_performers.
+8. Only no_op if ALL issues are fixed or episode is near convergence.
 
 Return ONLY JSON: {"action_type": "...", "parameters": {...}, "reasoning": "..."}
 """.strip()
@@ -138,6 +145,10 @@ def _has_active_underperformer(campaign) -> bool:
     return any((not adset.is_paused) and (adset.true_roas < 1.0) for adset in campaign.adsets)
 
 
+def _context_has(context: str, text: str) -> bool:
+    return text.lower() in (context or "").lower()
+
+
 def _core_issues_fixed(campaign, action_history: List[str]) -> bool:
     window_fixed = campaign.attribution_window != "1d_click"
     capi_fixed = campaign.conversions_api_enabled
@@ -155,8 +166,31 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
     campaign = obs.campaign_data
     reallocation_count = action_history.count("reallocate_to_top_performers")
     budget_adjusted = "adjust_budget_allocation" in action_history
+    already_investigated = _context_has(obs.context, "Tracking investigated: YES")
+    uncertainty_reintroduced = _context_has(obs.context, "Uncertainty reintroduced: YES")
+    stack_stable = (
+        campaign.attribution_window != "1d_click"
+        and campaign.conversions_api_enabled
+        and campaign.aem_enabled
+        and campaign.modeled_conversions_enabled
+        and not _has_active_underperformer(campaign)
+    )
     
-    # Priority 1: Fix narrow attribution window
+    # Priority 1: Investigate signal uncertainty first.
+    if (
+        campaign.pixel_signal_quality < 0.7
+        and (
+            (not already_investigated and "investigate_attribution" not in action_history)
+            or (uncertainty_reintroduced and action_history.count("investigate_attribution") < 2)
+        )
+    ):
+        return Action(
+            action_type="investigate_attribution",
+            parameters={},
+            reasoning="Investigating attribution reliability before downstream optimization"
+        )
+
+    # Priority 2: Fix narrow attribution window
     if campaign.attribution_window == "1d_click":
         return Action(
             action_type="adjust_attribution_window",
@@ -180,7 +214,15 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
             reasoning="Enabling AEM for additional iOS privacy-safe tracking"
         )
     
-    # Priority 4: Pause underperforming adsets (true ROAS < 1.0)
+    # Priority 4: Switch to modeled reporting when lagged signals are high.
+    if (obs.attribution_gap_pct > 0.35 or "Pending delayed conversions:" in obs.context) and not campaign.modeled_conversions_enabled:
+        return Action(
+            action_type="switch_to_modeled_conversions",
+            parameters={},
+            reasoning="Lagged and incomplete tracking requires modeled reporting for decision quality"
+        )
+
+    # Priority 5: Pause underperforming adsets (true ROAS < 1.0)
     if _has_active_underperformer(campaign):
         return Action(
             action_type="pause_underperforming_adsets",
@@ -188,8 +230,8 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
             reasoning="Pausing active adsets with true ROAS below break-even"
         )
 
-    # Priority 5 (hard): lock budget allocation once to resolve budget issue deterministically.
-    if task_id == "hard_full_attribution_audit" and campaign.adsets and not budget_adjusted:
+    # Priority 6 (hard): lock budget allocation once to resolve budget issue deterministically.
+    if task_id == "hard_full_attribution_audit" and campaign.adsets and not budget_adjusted and reallocation_count >= 1:
         active = [a for a in campaign.adsets if not a.is_paused]
         if len(active) >= 2:
             top = max(active, key=lambda a: a.true_roas)
@@ -208,8 +250,8 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
                 ),
             )
 
-    # Priority 6: one controlled reallocation at most.
-    if campaign.adsets and reallocation_count < MAX_REALLOCATIONS_PER_EPISODE:
+    # Priority 7: one controlled reallocation at most.
+    if campaign.adsets and reallocation_count < MAX_REALLOCATIONS_PER_EPISODE and not _has_active_underperformer(campaign):
         top_performer = max(
             (a for a in campaign.adsets if not a.is_paused),
             key=lambda a: a.true_roas,
@@ -229,7 +271,16 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
                     reasoning=f"One-time reallocation to {top_performer.adset_name} (ROAS {top_performer.true_roas:.2f}x)"
                 )
     
-    # Priority 6: Add UTM tracking if missing
+    # Priority 8: Promote only after foundational attribution fixes.
+    if stack_stable:
+        if action_history.count("promote_ad") < 2 and obs.delayed_conversion_release_events > 1:
+            return Action(
+                action_type="promote_ad",
+                parameters={},
+                reasoning="Scaling after attribution stack stabilization"
+            )
+
+    # Priority 9: Add UTM tracking if missing
     if not campaign.utm_tracking:
         return Action(
             action_type="add_utm_tracking",
@@ -251,6 +302,39 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
         parameters={},
         reasoning="No further high-value action identified"
     )
+
+
+def _action_allowed(obs, action: Action, action_history: List[str]) -> bool:
+    campaign = obs.campaign_data
+    already_investigated = _context_has(obs.context, "Tracking investigated: YES")
+    uncertainty_reintroduced = _context_has(obs.context, "Uncertainty reintroduced: YES")
+    stack_stable = (
+        campaign.attribution_window != "1d_click"
+        and campaign.conversions_api_enabled
+        and campaign.aem_enabled
+        and campaign.modeled_conversions_enabled
+        and not _has_active_underperformer(campaign)
+    )
+
+    if action.action_type == "investigate_attribution":
+        if action_history.count("investigate_attribution") >= 1 and not uncertainty_reintroduced:
+            return False
+        if already_investigated and not uncertainty_reintroduced:
+            return False
+
+    if action.action_type == "promote_ad" and not stack_stable:
+        return False
+
+    if action.action_type == "promote_ad" and action_history.count("promote_ad") >= 2:
+        return False
+
+    if action.action_type in {"reallocate_to_top_performers", "adjust_budget_allocation"} and _has_active_underperformer(campaign):
+        return False
+
+    if action.action_type == "adjust_budget_allocation" and action_history.count("reallocate_to_top_performers") == 0:
+        return False
+
+    return True
 
 
 def _infer_next_action(client: OpenAI, model: str, observation_context: str, obs, task_id: str, action_history: List[str]) -> Action:
@@ -280,7 +364,7 @@ def _infer_next_action(client: OpenAI, model: str, observation_context: str, obs
             llm_action = Action(action_type="no_op", parameters={}, reasoning="reallocation_guard")
 
         # If LLM gives a real action (not no_op), use it.
-        if llm_action.action_type != "no_op":
+        if llm_action.action_type != "no_op" and _action_allowed(obs, llm_action, action_history):
             return llm_action
     except Exception:
         pass  # Fall through to rule-based
@@ -351,9 +435,19 @@ def run_task(client: OpenAI, task_id: str) -> int:
 
 
 def main() -> int:
+    missing = []
+    if not API_BASE_URL:
+        missing.append("API_BASE_URL")
+    if not MODEL_NAME:
+        missing.append("MODEL_NAME")
     if not API_KEY:
-        # Keep behavior explicit for validators/users.
-        raise EnvironmentError("HF_TOKEN (or OPENAI_API_KEY/API_KEY) is required for inference")
+        missing.append("HF_TOKEN")
+    if missing:
+        raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
+    if MODEL_NAME != REQUIRED_MODEL_NAME:
+        raise EnvironmentError(
+            f"MODEL_NAME must be '{REQUIRED_MODEL_NAME}' for this codebase. Got: '{MODEL_NAME}'"
+        )
 
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 

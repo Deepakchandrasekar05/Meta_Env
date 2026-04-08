@@ -26,6 +26,20 @@ TASKS = [
 ]
 
 
+def _format_context_for_console(raw_context: str) -> str:
+    """Hide verbose adset breakdown from console while keeping step/issue lines."""
+    marker = "\n\nAdset Performance Breakdown:"
+    if marker not in raw_context:
+        return raw_context
+    head, tail = raw_context.split(marker, 1)
+    step_marker = "\nStep "
+    if step_marker in tail:
+        tail = tail[tail.index(step_marker):]
+    else:
+        tail = ""
+    return head + tail
+
+
 def run_task(task_id: str, agent: BaselineAgent, verbose: bool = True) -> dict:
     env = MetaAdsAttributionEnv(task_id=task_id)
     obs = env.reset()
@@ -34,7 +48,7 @@ def run_task(task_id: str, agent: BaselineAgent, verbose: bool = True) -> dict:
         print(f"\n{'='*60}")
         print(f"TASK: {task_id.upper()}")
         print(f"{'='*60}")
-        print(obs.context)
+        print(_format_context_for_console(obs.context))
         print()
 
     total_reward = 0.0
@@ -53,6 +67,14 @@ def run_task(task_id: str, agent: BaselineAgent, verbose: bool = True) -> dict:
         if verbose:
             print(f"           Reward: {reward.total:.4f}  ({reward.explanation})")
             print(f"           Effects: {info['effects']}")
+            print(
+                "           Delay Stats: "
+                f"pending={obs.pending_delayed_conversions} "
+                f"released_step={obs.delayed_conversion_release_events} "
+                f"cumulative={obs.cumulative_delayed_conversions} "
+                f"tracked={obs.tracked_conversions_accumulated} "
+                f"modeled={obs.modeled_conversions_accumulated}"
+            )
 
         step += 1
         if done:
@@ -68,9 +90,6 @@ def run_task(task_id: str, agent: BaselineAgent, verbose: bool = True) -> dict:
         print("  Breakdown:")
         for k, v in result.breakdown.items():
             print(f"    {k}: {v}")
-        print("  Feedback:")
-        for fb in result.feedback:
-            print(f"    {fb}")
 
     return {
         "task_id":            result.task_id,

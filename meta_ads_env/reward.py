@@ -1,22 +1,9 @@
-"""
-reward.py — Reward function with partial-progress signals.
-
-Reward breakdown (total sums to ≤ 1.0):
-  0.35  Attribution accuracy improvement  (gap between true & reported closes)
-  0.25  Signal quality gain               (pixel quality rises)
-  0.25  ROAS improvement                  (reported ROAS approaches true ROAS)
-  0.10  Action validity                   (valid, non-redundant action)
-  0.05  Step efficiency                   (bonus for resolving early)
-
-Penalties:
-  -0.05 per no_op action
-  -0.02 per repeated identical action
-"""
+"""Reward utilities for episode-level scoring and trajectory penalties."""
 
 from __future__ import annotations
 from typing import List
 
-from meta_ads_env.models import Action, EnvState, Reward, RewardComponents
+from meta_ads_env.models import EnvState
 
 
 MAX_COMPONENTS = {
@@ -49,9 +36,9 @@ def compute_episode_reward(
     else:
         gap_closed = 1.0
 
-    # 2. Signal quality recovery
+    # 2. Signal quality recovery (tracking reliability, not just pixel quality)
     if initial_signal < 1.0:
-        signal_recovered = max(c.pixel_signal_quality - initial_signal, 0) / (1.0 - initial_signal)
+        signal_recovered = max(final_state.tracking_reliability - initial_signal, 0) / (1.0 - initial_signal)
     else:
         signal_recovered = 1.0
 
@@ -66,12 +53,21 @@ def compute_episode_reward(
     issues_fixed = len(set(final_state.issues_resolved) & set(final_state.issues_remaining))
     issues_fraction = (issues_fixed / issues_total) if issues_total > 0 else 1.0
 
+    # 5. Action efficiency and redundancy quality
+    action_efficiency = 1.0 - min(
+        max(final_state.step_count - final_state.optimal_steps_hint, 0) / max(final_state.max_steps, 1),
+        1.0,
+    )
+    redundancy_penalty = max(-penalise_trajectory(final_state.history), 0.0)
+
     # Weighted final score
     score = (
-        gap_closed        * MAX_COMPONENTS["attribution_accuracy"]
+        gap_closed         * MAX_COMPONENTS["attribution_accuracy"]
         + signal_recovered * MAX_COMPONENTS["signal_quality_gain"]
-        + roas_ratio       * MAX_COMPONENTS["roas_improvement"]
-        + issues_fraction  * (MAX_COMPONENTS["action_validity"] + MAX_COMPONENTS["step_efficiency"])
+        + roas_ratio        * MAX_COMPONENTS["roas_improvement"]
+        + issues_fraction   * MAX_COMPONENTS["action_validity"]
+        + action_efficiency * MAX_COMPONENTS["step_efficiency"]
+        - redundancy_penalty * 0.05
     )
 
     return round(min(score, 1.0), 4)
@@ -84,12 +80,31 @@ def penalise_trajectory(history: List[dict]) -> float:
     penalty = 0.0
     seen_actions: List[str] = []
 
+    previous_action = ""
+    repeated_streak = 0
+
     for step in history:
         act = step.get("action", "")
+
         if act == "no_op":
             penalty -= 0.05
+
         if act in seen_actions:
             penalty -= 0.02
+
+        if act == previous_action and act:
+            repeated_streak += 1
+            penalty -= min(0.01 * repeated_streak, 0.05)
+        else:
+            repeated_streak = 0
+
+        if act == "reduce_budget" and previous_action == "promote_ad":
+            penalty -= 0.015
+
+        if act == "promote_ad" and previous_action == "reduce_budget":
+            penalty -= 0.015
+
+        previous_action = act
         seen_actions.append(act)
 
     return round(penalty, 4)

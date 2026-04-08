@@ -15,11 +15,45 @@ from typing import Dict, List
 from pydantic import BaseModel
 
 from meta_ads_env.models import EnvState
-from meta_ads_env.reward import compute_episode_reward, penalise_trajectory
+from meta_ads_env.reward import penalise_trajectory
 from meta_ads_env.simulator import _attribution_gap, compute_pixel_quality
 
 
 PASS_THRESHOLD = 0.60   # minimum score to "pass" a task
+
+
+def _trajectory_metrics(state: EnvState, initial_gap: float, initial_signal: float, initial_true_roas: float) -> Dict[str, float]:
+    c = state.campaign
+
+    final_gap = _attribution_gap(c)
+    gap_reduction = (max(initial_gap - final_gap, 0) / initial_gap) if initial_gap > 0 else 1.0
+
+    final_signal = state.tracking_reliability
+    signal_recovery = (
+        max(final_signal - initial_signal, 0) / max(1.0 - initial_signal, 0.01)
+        if initial_signal < 1.0
+        else 1.0
+    )
+
+    roas_improvement = (
+        max(c.true_roas - initial_true_roas, 0) / max(initial_true_roas, 0.01)
+        if initial_true_roas > 0
+        else 0.0
+    )
+
+    efficiency = max(0.0, 1.0 - (state.step_count / max(state.max_steps, 1)))
+    action_efficiency = 1.0 - min(max(state.step_count - state.optimal_steps_hint, 0) / max(state.max_steps, 1), 1.0)
+    redundancy_penalty = max(-penalise_trajectory(state.history), 0.0)
+
+    return {
+        "gap_reduction": round(min(max(gap_reduction, 0.0), 1.0), 4),
+        "signal_recovery": round(min(max(signal_recovery, 0.0), 1.0), 4),
+        "roas_improvement": round(min(max(roas_improvement, 0.0), 1.0), 4),
+        "efficiency": round(efficiency, 4),
+        "action_efficiency": round(action_efficiency, 4),
+        "redundancy_penalty": round(redundancy_penalty, 4),
+        "issues_resolved_count": float(len(set(state.issues_resolved))),
+    }
 
 
 class TaskResult(BaseModel):
@@ -49,23 +83,30 @@ def grade_easy(state: EnvState, initial_gap: float = 0.62) -> TaskResult:
     else:
         feedback.append(f"❌ Attribution window still '{c.attribution_window}' — should be 7d_click or wider")
 
-    # Secondary: how much of the gap was closed
-    final_gap = _attribution_gap(c)
-    gap_closed = max(initial_gap - final_gap, 0) / initial_gap if initial_gap > 0 else 1.0
+    metrics = _trajectory_metrics(
+        state,
+        initial_gap=initial_gap,
+        initial_signal=state.signal_quality_history[0] if state.signal_quality_history else state.tracking_reliability,
+        initial_true_roas=state.campaign.true_roas,
+    )
+
+    gap_closed = metrics["gap_reduction"]
     if gap_closed >= 0.50:
         feedback.append(f"✅ Attribution gap reduced by {gap_closed:.0%}")
     else:
         feedback.append(f"⚠️  Attribution gap only reduced by {gap_closed:.0%}")
 
     # Efficiency
-    efficiency = max(0, 1 - (state.step_count / state.max_steps))
+    efficiency = metrics["efficiency"]
     feedback.append(f"ℹ️  Completed in {state.step_count}/{state.max_steps} steps")
-
-    trajectory_penalty = penalise_trajectory(state.history)
 
     score = round(
         max(
-            (window_score * 0.55) + (gap_closed * 0.35) + (efficiency * 0.10) + trajectory_penalty,
+            (window_score * 0.50)
+            + (gap_closed * 0.30)
+            + (metrics["signal_recovery"] * 0.05)
+            + (metrics["action_efficiency"] * 0.15)
+            - (metrics["redundancy_penalty"] * 0.10),
             0.0,
         ),
         4,
@@ -80,7 +121,10 @@ def grade_easy(state: EnvState, initial_gap: float = 0.62) -> TaskResult:
             "window_correct":   window_score,
             "gap_closed":       round(gap_closed, 4),
             "efficiency":       round(efficiency, 4),
-            "trajectory_penalty": trajectory_penalty,
+            "signal_recovery": metrics["signal_recovery"],
+            "action_efficiency": metrics["action_efficiency"],
+            "redundant_action_penalty": metrics["redundancy_penalty"],
+            "issues_resolved_count": metrics["issues_resolved_count"],
         },
         feedback=feedback,
         steps_used=state.step_count,
@@ -110,8 +154,15 @@ def grade_medium(state: EnvState, initial_signal: float = 0.325) -> TaskResult:
     else:
         feedback.append("⚠️  AEM not enabled — modelled conversions unavailable")
 
+    metrics = _trajectory_metrics(
+        state,
+        initial_gap=state.attribution_gap_history[0] if state.attribution_gap_history else _attribution_gap(c),
+        initial_signal=initial_signal,
+        initial_true_roas=state.campaign.true_roas,
+    )
+
     # Signal quality achieved
-    achieved_signal = c.pixel_signal_quality
+    achieved_signal = state.tracking_reliability
     optimal_signal  = compute_pixel_quality(c.ios_traffic_pct, True, True, True)
     signal_fraction = (achieved_signal - initial_signal) / max(optimal_signal - initial_signal, 0.01)
     signal_fraction = round(min(max(signal_fraction, 0), 1), 4)
@@ -120,16 +171,16 @@ def grade_medium(state: EnvState, initial_signal: float = 0.325) -> TaskResult:
         f"(optimal: {optimal_signal:.0%})"
     )
 
-    efficiency = max(0, 1 - (state.step_count / state.max_steps))
-    trajectory_penalty = penalise_trajectory(state.history)
+    efficiency = metrics["efficiency"]
 
     score = round(
         max(
             capi_score * 0.40
             + aem_score * 0.25
             + signal_fraction * 0.25
-            + efficiency * 0.10
-            + trajectory_penalty,
+            + metrics["action_efficiency"] * 0.10
+            + metrics["roas_improvement"] * 0.08
+            - metrics["redundancy_penalty"] * 0.08,
             0.0,
         ),
         4,
@@ -145,7 +196,10 @@ def grade_medium(state: EnvState, initial_signal: float = 0.325) -> TaskResult:
             "aem_enabled":     aem_score,
             "signal_recovery": signal_fraction,
             "efficiency":      round(efficiency, 4),
-            "trajectory_penalty": trajectory_penalty,
+            "roas_improvement": metrics["roas_improvement"],
+            "action_efficiency": metrics["action_efficiency"],
+            "redundant_action_penalty": metrics["redundancy_penalty"],
+            "issues_resolved_count": metrics["issues_resolved_count"],
         },
         feedback=feedback,
         steps_used=state.step_count,
@@ -165,7 +219,15 @@ def grade_hard(
 ) -> TaskResult:
     c = state.campaign
     feedback: List[str] = []
-    issues_required = {"attribution_window", "conversions_api", "aem", "budget_allocation", "paused_bad_adsets"}
+    issues_required = {
+        "attribution_window",
+        "conversions_api",
+        "aem",
+        "modeled_reporting",
+        "tracking_investigated",
+        "budget_allocation",
+        "paused_bad_adsets",
+    }
     resolved = set(state.issues_resolved) & issues_required
 
     checks: Dict[str, float] = {}
@@ -188,16 +250,27 @@ def grade_hard(
     checks["paused_bad_adsets"] = 1.0 if paused_any else 0.0
     feedback.append(("✅" if paused_any else "❌") + " Paused under-performing adsets")
 
+    checks["tracking_investigated"] = 1.0 if state.tracking_investigated else 0.0
+    feedback.append(("✅" if state.tracking_investigated else "❌") + " Tracking investigated")
+
+    checks["modeled_reporting"] = 1.0 if c.attribution_reporting_mode == "modeled" else 0.0
+    feedback.append(("✅" if c.attribution_reporting_mode == "modeled" else "❌") + " Modeled reporting enabled")
+
     # 5. Budget reallocation
     budget_reallocated = "budget_allocation" in state.issues_resolved or "budget_reallocation" in state.issues_resolved
     checks["budget_allocation"] = 1.0 if budget_reallocated else 0.0
     feedback.append(("✅" if budget_reallocated else "❌") + " Budget reallocated to top performers")
 
-    # Signal and ROAS improvement
-    final_gap    = _attribution_gap(c)
-    gap_closed   = max(initial_gap - final_gap, 0) / initial_gap if initial_gap > 0 else 1.0
-    sig_recovery = max(c.pixel_signal_quality - initial_signal, 0) / max(1.0 - initial_signal, 0.01)
-    roas_gain    = min(max(c.true_roas - initial_true_roas, 0) / initial_true_roas, 1.0) if initial_true_roas > 0 else 0
+    metrics = _trajectory_metrics(
+        state,
+        initial_gap=initial_gap,
+        initial_signal=initial_signal,
+        initial_true_roas=initial_true_roas,
+    )
+
+    gap_closed = metrics["gap_reduction"]
+    sig_recovery = metrics["signal_recovery"]
+    roas_gain = metrics["roas_improvement"]
 
     feedback.append(
         f"ℹ️  Gap closed: {gap_closed:.0%} | Signal: {initial_signal:.0%}→{c.pixel_signal_quality:.0%} | "
@@ -205,8 +278,13 @@ def grade_hard(
     )
 
     issues_fraction = len(resolved) / len(issues_required)
-    trajectory_penalty = penalise_trajectory(state.history)
-    efficiency = max(0, 1 - (state.step_count / state.max_steps))
+    efficiency = metrics["efficiency"]
+
+    critical_missing_penalty = (
+        (1.0 - checks["paused_bad_adsets"]) * 0.15
+        + (1.0 - checks["tracking_investigated"]) * 0.07
+        + (1.0 - checks["modeled_reporting"]) * 0.08
+    )
 
     score = round(
         max(
@@ -214,8 +292,9 @@ def grade_hard(
             + gap_closed    * 0.20
             + sig_recovery  * 0.15
             + roas_gain     * 0.15
-            + efficiency    * 0.10
-            + trajectory_penalty,
+            + metrics["action_efficiency"] * 0.10
+            - metrics["redundancy_penalty"] * 0.10,
+            - critical_missing_penalty,
             0.0,
         ),
         4,
@@ -233,7 +312,10 @@ def grade_hard(
             "signal_recovery": round(sig_recovery, 4),
             "roas_gain":       round(roas_gain, 4),
             "efficiency":      round(efficiency, 4),
-            "trajectory_penalty": trajectory_penalty,
+            "action_efficiency": metrics["action_efficiency"],
+            "redundant_action_penalty": metrics["redundancy_penalty"],
+            "critical_missing_penalty": round(critical_missing_penalty, 4),
+            "issues_resolved_count": metrics["issues_resolved_count"],
         },
         feedback=feedback,
         steps_used=state.step_count,
