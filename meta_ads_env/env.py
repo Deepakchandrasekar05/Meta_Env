@@ -162,7 +162,9 @@ class MetaAdsAttributionEnv:
             f"Attribution window: {c.attribution_window}\n"
             f"Pixel signal quality: {c.pixel_signal_quality:.0%}  "
             f"(iOS traffic: {c.ios_traffic_pct:.0%})\n"
+            f"Pixel match quality: {c.pixel_match_quality:.0%} | CAPI coverage: {c.capi_coverage:.0%}\n"
             f"Server-side signal quality: {c.server_signal_quality:.0%}\n"
+            f"Attribution confidence: {s.attribution_confidence:.0%}\n"
             f"Tracking reliability (observability): {s.tracking_reliability:.0%}\n"
             f"State confidence score: {s.confidence_score:.0%}\n"
             f"Tracking investigated: {'YES' if s.tracking_investigated else 'NO'} | "
@@ -200,6 +202,11 @@ class MetaAdsAttributionEnv:
             budget_remaining=c.total_budget - c.budget_spent,
             roas_reported=c.reported_roas,
             roas_true=c.true_roas,
+            attribution_confidence=s.attribution_confidence,
+            capi_coverage=c.capi_coverage,
+            pixel_match_quality=c.pixel_match_quality,
+            conversion_delay_index=c.conversion_delay_index,
+            avg_conversion_delay_days=c.avg_conversion_delay_days,
             pending_delayed_conversions=len(s.pending_delayed_conversions),
             modeled_conversions_accumulated=s.modeled_conversions_total,
             tracked_conversions_accumulated=s.tracked_conversions_total,

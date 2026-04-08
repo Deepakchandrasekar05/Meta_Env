@@ -45,11 +45,15 @@ class CampaignData(BaseModel):
     pixel_signal_quality: float     # 0.0–1.0
     ios_traffic_pct: float          # 0.0–1.0
     conversions_api_enabled: bool
+    capi_coverage: float = 0.0        # estimated server-side event coverage 0.0-1.0
     aem_enabled: bool               # Aggregated Event Measurement
     utm_tracking: bool
     modeled_conversions_enabled: bool = False
     attribution_reporting_mode: Literal["observed", "modeled"] = "observed"
     server_signal_quality: float = 0.0
+    pixel_match_quality: float = 0.0
+    conversion_delay_index: float = 1.0
+    avg_conversion_delay_days: float = 4.0
     adsets: List[AdSetMetrics] = Field(default_factory=list)
 
 
@@ -80,6 +84,11 @@ class Observation(BaseModel):
     budget_remaining: float
     roas_reported: float
     roas_true: float
+    attribution_confidence: float = 0.0
+    capi_coverage: float = 0.0
+    pixel_match_quality: float = 0.0
+    conversion_delay_index: float = 1.0
+    avg_conversion_delay_days: float = 4.0
     pending_delayed_conversions: int = 0
     modeled_conversions_accumulated: int = 0
     tracked_conversions_accumulated: int = 0
@@ -166,7 +175,7 @@ class RewardComponents(BaseModel):
 
 
 class Reward(BaseModel):
-    total: float = Field(ge=0.0, le=1.0)
+    total: float = Field(ge=-1.0, le=1.0)
     components: RewardComponents
     explanation: str = ""
 
@@ -202,6 +211,7 @@ class EnvState(BaseModel):
     roas_history: List[float] = Field(default_factory=list)
     signal_quality_history: List[float] = Field(default_factory=list)
     optimal_steps_hint: int = 4
+    optimal_steps: int = 4
     scenario_delay_range: List[int] = Field(default_factory=lambda: [2, 7])
     tracking_investigated: bool = False
     uncertainty_reintroduced: bool = False
@@ -220,5 +230,10 @@ class EnvState(BaseModel):
     risk_events: List[str] = Field(default_factory=list)
     budget_optimization_multiplier: float = 1.0
     confidence_score: float = 0.5
+    attribution_confidence: float = 0.5
     episode_risk_initialized: bool = False
     easy_meaningful_actions_taken: int = 0
+    reasoning_log: List[str] = Field(default_factory=list)
+    early_wrong_decision: bool = False
+    recovered_after_wrong_decision: bool = False
+    random_seed: int = 42

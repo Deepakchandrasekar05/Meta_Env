@@ -3,9 +3,9 @@
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-Compliant-brightgreen)](https://openenv.dev)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-**An OpenEnv-compliant reinforcement learning environment simulating the real-world challenge of Meta Ads attribution recovery under iOS tracking limitations, narrow attribution windows, and incomplete conversion data.**
+**An OpenEnv-compliant reinforcement learning environment that models Meta Ads attribution recovery under iOS tracking constraints, narrow attribution windows, and incomplete conversion signals.**
 
-> 🚨 **The Problem**: Meta advertisers lose millions because iOS privacy updates, narrow attribution windows, and browser tracking restrictions cause **40-70% of conversions** to go untracked. Meta's algorithm optimizes on incomplete data, promoting ads with quick results while penalizing profitable ads with delayed conversions.
+> 🚨 **The Problem**: Meta advertisers lose significant revenue because iOS privacy changes, narrow attribution windows, and browser tracking restrictions leave **40-70% of conversions** untracked. As a result, Meta's optimization system learns from incomplete signals, often overvaluing short-lag outcomes while undervaluing high-performing ads with delayed conversions.
 
 ---
 
@@ -13,10 +13,10 @@
 
 ### What's Breaking Attribution?
 
-1. **Narrow Attribution Windows**: Meta reduced defaults from 28-day to 7-day (or 1-day), making conversions after 7 days invisible
-2. **iOS 14.5+ Privacy**: Apple's ATT blocks ~60% of iOS conversions from being tracked by Meta Pixel
-3. **Browser Restrictions**: Safari ITP, Firefox tracking protection, and ad blockers degrade signal further
-4. **Missing Server-Side Tracking**: Many advertisers haven't implemented Conversions API (CAPI) to recover server-side events
+1. **Narrow Attribution Windows**: Defaults shifted from 28-day to 7-day (or 1-day), so later conversions are excluded.
+2. **iOS 14.5+ Privacy**: Apple ATT suppresses a large share of iOS conversion tracking via Meta Pixel.
+3. **Browser Restrictions**: Safari ITP, Firefox protections, and ad blockers further reduce signal quality.
+4. **Missing Server-Side Tracking**: Many advertisers still lack Conversions API (CAPI), limiting server-side recovery.
 
 ### The Impact
 
@@ -25,13 +25,13 @@
 - ✅ **True Performance**: 180 conversions, $25 CPA, 3.0x ROAS → *Actually highly profitable!*
 - ❌ **Attribution Gap**: **67% of conversions untracked**
 
-**Result**: Meta's algorithm pauses profitable ads and promotes underperformers.
+**Result**: The optimization loop can pause profitable inventory and over-allocate spend to weaker ad sets.
 
 ### This Environment Teaches Agents To:
-1. Diagnose attribution issues from campaign metrics
-2. Apply technical fixes (widen windows, enable CAPI/AEM)
-3. Optimize budget allocation based on true performance
-4. Recover signal quality to restore algorithm effectiveness
+1. Diagnose attribution failures from campaign-level and ad set-level signals.
+2. Apply technical remediations (window expansion, CAPI, AEM).
+3. Reallocate budget using true performance rather than biased observed metrics.
+4. Recover signal quality so optimization decisions become reliable again.
 
 ---
 
@@ -42,7 +42,7 @@
 - **Standard API**: `reset()`, `step(action)`, `state()`
 - **Three difficulty levels** with programmatic graders (0.0–1.0 scoring)
 - **Realistic simulator** modeling attribution degradation
-- **Multi-component rewards** with partial progress signals
+- **Multi-component rewards** that capture incremental progress
 
 ### Key Metrics
 - **Episode Length**: 5-10 steps
@@ -97,19 +97,19 @@
 ## 📊 Tasks & Difficulty
 
 ### 🟢 Easy: Attribution Window Fix
-**Problem**: 1-day attribution window missing 67% of conversions  
+**Problem**: A 1-day attribution window excludes most delayed conversions.  
 **Solution**: Adjust to 7-day click window  
-**Baseline Score**: 0.854 ✅
+**Baseline Score**: 0.893 ✅
 
 ### 🟡 Medium: iOS Signal Recovery
-**Problem**: 55% iOS traffic + no CAPI/AEM = 67% signal loss  
+**Problem**: High iOS share without CAPI/AEM causes substantial signal loss.  
 **Solution**: Enable CAPI → Enable AEM  
-**Baseline Score**: 0.782 ✅
+**Baseline Score**: 0.850 ✅
 
 ### 🔴 Hard: Full Attribution Audit
-**Problem**: 1d window + 60% iOS + no CAPI/AEM + bad budget allocation  
+**Problem**: Narrow window, high iOS exposure, missing tracking stack, and misallocated budget.  
 **Solution**: Multi-step optimization (5+ actions)  
-**Baseline Score**: 0.691 ✅
+**Baseline Score**: 0.794 ✅
 
 ---
 
@@ -127,14 +127,19 @@ pip install -r requirements.txt
 
 # Set up API key (copy .env.example to .env and add your key)
 cp .env.example .env
-# Edit .env: OPENAI_API_KEY=sk-your-key-here
+# Edit .env with required values:
+# API_BASE_URL=https://router.huggingface.co/v1
+# MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
+# HF_TOKEN=hf_your_token_here
 ```
 
 ### Run Baseline Agent
 
 ```bash
-# Required: Set your OpenAI API key
-export OPENAI_API_KEY=sk-your-key-here
+# Required (for LLM-backed paths):
+export API_BASE_URL=https://router.huggingface.co/v1
+export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
+export HF_TOKEN=hf_your_token_here
 
 # Run baseline across all 3 tasks
 python baseline/run_baseline.py
@@ -143,15 +148,15 @@ python baseline/run_baseline.py
 **Expected Output:**
 ```
 TASK: EASY_ATTRIBUTION_WINDOW
-Score: 0.8542 (PASS ✅) | Steps: 2/5
+Score: 0.8926 (PASS ✅) | Steps: 5/5
 
 TASK: MEDIUM_PIXEL_RECOVERY  
-Score: 0.7820 (PASS ✅) | Steps: 3/7
+Score: 0.8500 (PASS ✅) | Steps: 4/7
 
 TASK: HARD_FULL_ATTRIBUTION_AUDIT
-Score: 0.6910 (PASS ✅) | Steps: 6/10
+Score: 0.7942 (PASS ✅) | Steps: 7/10
 
-Average Score: 0.776
+Average Score: 0.8456
 ```
 
 ### Launch Demo UI
@@ -196,20 +201,20 @@ if done:
 
 ## 📈 Baseline Results
 
-**Model**: Qwen/Qwen2.5-72B-Instruct (Free HF model!) | **Temperature**: 0.0
+**Model**: Qwen/Qwen2.5-72B-Instruct (OpenAI-compatible interface) | **Temperature**: 0.0
 
 | Task | Score | Pass | Steps | Key Actions |
 |------|-------|------|-------|-------------|
-| Easy | 0.786 | ✅ | 1/5 | Adjust window to 7d_click |
-| Medium | 0.971 | ✅ | 2/7 | Enable CAPI + AEM |
-| Hard | 0.718 | ✅ | 6/10 | Window + CAPI + AEM + pause bad adsets + reallocate |
-| **Average** | **0.825** | **100%** | - | **All passing!** 🎉 |
+| Easy | 0.893 | ✅ | 5/5 | Investigate + window fix + convergence handling |
+| Medium | 0.850 | ✅ | 4/7 | Investigate + CAPI + AEM + modeled reporting |
+| Hard | 0.794 | ✅ | 7/10 | Investigate + window + CAPI + AEM + pause + reallocate |
+| **Average** | **0.846** | **100%** | - | **All passing!** 🎉 |
 
 ---
 
 ## 🎁 Reward Function
 
-Multi-component reward encouraging partial progress:
+Multi-component reward designed to reward meaningful progress:
 
 ```python
 reward = (
@@ -222,7 +227,7 @@ reward = (
 )
 ```
 
-**Range**: 0.0 to 1.0 per step
+**Range**: -1.0 to 1.0 per step
 
 ---
 
@@ -231,29 +236,28 @@ reward = (
 ### Build and Run Locally
 ```bash
 docker build -t meta-ads-env .
-docker run -p 7860:7860 -e OPENAI_API_KEY=sk-your-key meta-ads-env
+docker run -p 7860:7860 -e API_BASE_URL=https://router.huggingface.co/v1 -e MODEL_NAME=Qwen/Qwen2.5-72B-Instruct -e HF_TOKEN=hf_your_token_here meta-ads-env
 ```
 
 ### Deploy to Hugging Face Spaces
 1. Create new Space (Docker SDK)
-2. Add `OPENAI_API_KEY` as Space secret
-3. Push code to Space repository
+2. Add `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN` as Space secrets
+3. Push code to the Space repository
 4. Space auto-builds and deploys
 
 ---
 
-## 🧪 Hackathon Submission (Required)
+## 🧪 Inference Workflow
 
 ### Inference Script
 
-The hackathon requires `inference.py` in the repository root.
+Use `inference.py` at the repository root to run standardized task inference with structured logs.
 
 **Set environment variables:**
 ```bash
-export API_BASE_URL=https://api.openai.com/v1
+export API_BASE_URL=https://router.huggingface.co/v1
 export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
-export HF_TOKEN=your_hf_token  # Optional, for HF models
-export OPENAI_API_KEY=sk-your-key-here
+export HF_TOKEN=hf_your_token_here
 ```
 
 **Run inference:**
@@ -263,11 +267,13 @@ python inference.py
 
 **Output format:**
 ```
-[START] task=easy_attribution_window
-[STEP] step=1 action=adjust_attribution_window reward=0.6800
-[END] task=easy_attribution_window score=0.8542 passed=True
+[START] task=easy_attribution_window env=meta_ads_attribution_openenv model=Qwen/Qwen2.5-72B-Instruct
+[STEP] step=1 action=investigate_attribution reward=0.09 done=false error=null
+[END] success=true steps=3 score=0.900 rewards=0.09,0.76,0.67
 ...
 ```
+
+This structured output is designed for easy monitoring, reproducible evaluation, and downstream parsing.
 
 ### Validate Submission
 ```bash
@@ -339,7 +345,7 @@ for episode in range(100):
 ```python
 from evaluation.llm_grader import LLMGrader
 
-grader = LLMGrader(model="gpt-4o")
+grader = LLMGrader(model="Qwen/Qwen2.5-72B-Instruct")
 result = grader.grade_trajectory(
     task_id="hard_full_attribution_audit",
     history=env.state().history,
@@ -352,18 +358,18 @@ result = grader.grade_trajectory(
 
 ## 📄 License
 
-MIT License - see LICENSE file for details
+MIT License - a permissive license that allows use, modification, and distribution with attribution. See LICENSE for full terms.
 
 ---
 
 ## 🙏 Acknowledgments
 
-Built for hackathon submission to demonstrate AI agents solving real-world business problems. Inspired by actual Meta Ads attribution challenges affecting millions of advertisers.
+Built to demonstrate how AI agents can solve high-impact marketing optimization problems in realistic attribution environments. Inspired by real Meta Ads attribution challenges faced by performance teams at scale.
 
 **OpenEnv**: RL environment specification  
-**Meta Ads Manager**: Real-world attribution crisis inspiration  
-**Digital Marketing Community**: For sharing attribution war stories
+**Meta Ads Manager**: Real-world attribution dynamics and constraints  
+**Digital Marketing Community**: Practical insights from attribution and measurement operations
 
 ---
 
-**🚀 Making AI agents understand real business problems**
+**🚀 Making attribution-aware AI optimization practical and measurable**

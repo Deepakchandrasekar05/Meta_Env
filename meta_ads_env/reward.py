@@ -55,7 +55,7 @@ def compute_episode_reward(
 
     # 5. Action efficiency and redundancy quality
     action_efficiency = 1.0 - min(
-        max(final_state.step_count - final_state.optimal_steps_hint, 0) / max(final_state.max_steps, 1),
+        max(final_state.step_count - final_state.optimal_steps, 0) / max(final_state.max_steps, 1),
         1.0,
     )
     redundancy_penalty = max(-penalise_trajectory(final_state.history), 0.0)
@@ -70,7 +70,7 @@ def compute_episode_reward(
         - redundancy_penalty * 0.05
     )
 
-    return round(min(score, 1.0), 4)
+    return round(min(max(score, 0.0), 1.0), 4)
 
 
 def penalise_trajectory(history: List[dict]) -> float:
@@ -94,9 +94,13 @@ def penalise_trajectory(history: List[dict]) -> float:
 
         if act == previous_action and act:
             repeated_streak += 1
+            penalty -= 0.05
             penalty -= min(0.01 * repeated_streak, 0.05)
         else:
             repeated_streak = 0
+
+        if len(seen_actions) >= 2 and act and (act == seen_actions[-1] or act == seen_actions[-2]):
+            penalty -= 0.02
 
         if act == "reduce_budget" and previous_action == "promote_ad":
             penalty -= 0.015
@@ -106,5 +110,11 @@ def penalise_trajectory(history: List[dict]) -> float:
 
         previous_action = act
         seen_actions.append(act)
+
+    if len(history) > 0 and len(history) > 0 and isinstance(history[-1], dict):
+        # Keep mild end-of-episode pressure against overlong trajectories.
+        last_step = int(history[-1].get("step", len(history)))
+        if last_step > 0:
+            penalty -= min(0.005 * max(last_step - 1, 0), 0.05)
 
     return round(penalty, 4)

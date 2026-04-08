@@ -56,7 +56,7 @@ def _build_hidden_delayed_events(total_hidden: int, adset_ids: list[str], min_de
 # ─────────────────────────────────────────────────────────────────────────────
 
 def make_easy_task() -> EnvState:
-    rng = random.Random()
+    rng = random.Random("easy_attribution_window")
     ios_pct = min(max(0.25 + rng.uniform(-0.025, 0.025), 0.15), 0.40)
     pixel_quality = compute_pixel_quality(
         ios_traffic_pct=ios_pct,   # moderate iOS share
@@ -94,6 +94,10 @@ def make_easy_task() -> EnvState:
         modeled_conversions_enabled=False,
         attribution_reporting_mode="observed",
         server_signal_quality=compute_server_signal_quality(False, False, True),
+        capi_coverage=0.12,
+        pixel_match_quality=0.66,
+        conversion_delay_index=0.96,
+        avg_conversion_delay_days=4.2,
         adsets=[
             AdSetMetrics(
                 adset_id="adset_retargeting",
@@ -147,6 +151,7 @@ def make_easy_task() -> EnvState:
         tracking_reliability=tracking_rel,
         attribution_investigation_level=0.0,
         optimal_steps_hint=3,
+        optimal_steps=3,
         scenario_delay_range=[2, 3],
         hidden_conversions_pool=max(true_conv - reported_conv, 0),
         conversion_rate_range=[0.08, 0.12],
@@ -162,6 +167,8 @@ def make_easy_task() -> EnvState:
         attribution_gap_history=[(true_conv - reported_conv) / true_conv],
         roas_history=[campaign.reported_roas],
         signal_quality_history=[tracking_rel],
+        attribution_confidence=0.5,
+        random_seed=101,
     )
 
 
@@ -172,19 +179,12 @@ def make_easy_task() -> EnvState:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def make_medium_task() -> EnvState:
-    rng = random.Random()
-    ios_pct = min(max(0.55 + rng.uniform(-0.05, 0.05), 0.40), 0.70)
-    pixel_quality = compute_pixel_quality(
-        ios_traffic_pct=ios_pct,
-        conversions_api=False,
-        aem_enabled=False,
-        utm_tracking=False,
-    )
-    true_conv = 240
+    rng = random.Random("medium_pixel_recovery")
+    ios_pct = 0.56
+    pixel_quality = 0.57
+    true_conv = 252
     attr_window = "7d_click"
-    reported_conv = compute_reported_conversions(true_conv, attr_window, pixel_quality)
-    severity = min(max(rng.uniform(0.90, 1.10), 0.82), 1.18)
-    reported_conv = max(int(round(reported_conv * (2.0 - severity))), 1)
+    reported_conv = 118
     spend = 8_200.0
 
     campaign = CampaignData(
@@ -210,6 +210,10 @@ def make_medium_task() -> EnvState:
         modeled_conversions_enabled=False,
         attribution_reporting_mode="observed",
         server_signal_quality=compute_server_signal_quality(False, False, False),
+        capi_coverage=0.18,
+        pixel_match_quality=0.55,
+        conversion_delay_index=0.92,
+        avg_conversion_delay_days=3.8,
         adsets=[
             AdSetMetrics(
                 adset_id="adset_retargeting",
@@ -247,7 +251,7 @@ def make_medium_task() -> EnvState:
         ],
     )
 
-    tracking_rel = compute_tracking_reliability(campaign, investigation_level=0.0)
+    tracking_rel = 0.53
 
     return EnvState(
         task_id="medium_pixel_recovery",
@@ -267,6 +271,7 @@ def make_medium_task() -> EnvState:
         tracking_reliability=tracking_rel,
         attribution_investigation_level=0.0,
         optimal_steps_hint=4,
+        optimal_steps=4,
         scenario_delay_range=[2, 5],
         hidden_conversions_pool=max(true_conv - reported_conv, 0),
         conversion_rate_range=[0.08, 0.12],
@@ -282,6 +287,11 @@ def make_medium_task() -> EnvState:
         attribution_gap_history=[(true_conv - reported_conv) / true_conv],
         roas_history=[campaign.reported_roas],
         signal_quality_history=[tracking_rel],
+        tracked_conversions_total=72,
+        modeled_conversions_total=44,
+        attribution_confidence=0.43,
+        confidence_score=0.43,
+        random_seed=202,
     )
 
 
@@ -292,19 +302,17 @@ def make_medium_task() -> EnvState:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def make_hard_task() -> EnvState:
-    rng = random.Random()
-    ios_pct = min(max(0.60 + rng.uniform(-0.06, 0.06), 0.45), 0.78)
+    rng = random.Random("hard_full_attribution_audit")
+    ios_pct = 0.62
     pixel_quality = compute_pixel_quality(
         ios_traffic_pct=ios_pct,
         conversions_api=False,
         aem_enabled=False,
         utm_tracking=False,
     )
-    true_conv = 310
+    true_conv = 320
     attr_window = "1d_click"
-    reported_conv = compute_reported_conversions(true_conv, attr_window, pixel_quality)
-    severity = min(max(rng.uniform(0.88, 1.14), 0.78), 1.24)
-    reported_conv = max(int(round(reported_conv * (2.0 - severity))), 1)
+    reported_conv = max(compute_reported_conversions(true_conv, attr_window, pixel_quality), 92)
     spend = 14_500.0
 
     campaign = CampaignData(
@@ -330,6 +338,10 @@ def make_hard_task() -> EnvState:
         modeled_conversions_enabled=False,
         attribution_reporting_mode="observed",
         server_signal_quality=compute_server_signal_quality(False, False, False),
+        capi_coverage=0.14,
+        pixel_match_quality=0.44,
+        conversion_delay_index=1.08,
+        avg_conversion_delay_days=5.6,
         adsets=[
             AdSetMetrics(
                 adset_id="adset_retargeting",
@@ -378,7 +390,7 @@ def make_hard_task() -> EnvState:
         ],
     )
 
-    tracking_rel = compute_tracking_reliability(campaign, investigation_level=0.0)
+    tracking_rel = 0.41
 
     return EnvState(
         task_id="hard_full_attribution_audit",
@@ -401,6 +413,7 @@ def make_hard_task() -> EnvState:
         tracking_reliability=tracking_rel,
         attribution_investigation_level=0.0,
         optimal_steps_hint=6,
+        optimal_steps=6,
         scenario_delay_range=[3, 7],
         hidden_conversions_pool=max(true_conv - reported_conv, 0),
         conversion_rate_range=[0.08, 0.12],
@@ -416,6 +429,11 @@ def make_hard_task() -> EnvState:
         attribution_gap_history=[(true_conv - reported_conv) / true_conv],
         roas_history=[campaign.reported_roas],
         signal_quality_history=[tracking_rel],
+        tracked_conversions_total=64,
+        modeled_conversions_total=36,
+        attribution_confidence=0.34,
+        confidence_score=0.34,
+        random_seed=303,
     )
 
 

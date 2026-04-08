@@ -1,6 +1,7 @@
 """Campaign simulation engine with delayed causal attribution dynamics."""
 
 from __future__ import annotations
+import math
 import random
 from typing import Dict, List, Tuple
 
@@ -92,11 +93,22 @@ def compute_server_signal_quality(
     return round(min(quality, 0.95), 4)
 
 
+def compute_attribution_confidence(
+    pixel_match_quality: float,
+    capi_coverage: float,
+    ios_traffic_pct: float,
+) -> float:
+    ios_component = 1.0 - min(max(ios_traffic_pct * 100.0, 0.0), 100.0) / 100.0
+    confidence = (pixel_match_quality * 0.4) + (capi_coverage * 0.4) + (ios_component * 0.2)
+    return round(min(max(confidence, 0.0), 1.0), 4)
+
+
 def compute_tracking_reliability(campaign: CampaignData, investigation_level: float) -> float:
     # Pixel degrades with iOS while server-side partially recovers signal.
     pixel_weight = 0.70
     server_weight = 0.30
     base = campaign.pixel_signal_quality * pixel_weight + campaign.server_signal_quality * server_weight
+    base = (base * 0.80) + (campaign.capi_coverage * 0.20)
     recovery = min(investigation_level, 1.0) * 0.18
     return round(min(base + recovery, 0.98), 4)
 
@@ -138,6 +150,10 @@ class SimulationEngine:
     (new_state, reward, done, info).
     """
 
+    def __init__(self, seed: int = 42):
+        self.seed = seed
+        self.rng = random.Random(seed)
+
     def apply(
         self,
         state: EnvState,
@@ -148,6 +164,16 @@ class SimulationEngine:
         c = new_state.campaign
         reward_components = RewardComponents()
         info: Dict = {"action_applied": action.action_type, "effects": []}
+
+        # Deterministic noise source: same task + same action trajectory => same outputs.
+        deterministic_seed = (
+            int(new_state.random_seed)
+            + ((new_state.day + 1) * 997)
+            + ((new_state.step_count + 1) * 211)
+            + (sum(ord(ch) for ch in action.action_type) * 3)
+            + (len(new_state.history) * 17)
+        )
+        self.rng.seed(deterministic_seed)
 
         # ── Snapshot before ──────────────────────────────────────────────
         before_gap = _attribution_gap(c)
@@ -161,6 +187,14 @@ class SimulationEngine:
         valid = True
         action_count = new_state.action_counts.get(action.action_type, 0) + 1
         new_state.action_counts[action.action_type] = action_count
+        prev_action = new_state.history[-1]["action"] if new_state.history else ""
+        prev2_action = new_state.history[-2]["action"] if len(new_state.history) >= 2 else ""
+        same_as_previous = action.action_type == prev_action and action.action_type != ""
+        repeat_count = 1
+        if same_as_previous:
+            repeat_count = 2
+            if action.action_type == prev2_action:
+                repeat_count = 3
         if action.action_type != "no_op":
             new_state.easy_meaningful_actions_taken += 1
         diminishing = _diminishing_returns(action_count)
@@ -203,6 +237,10 @@ class SimulationEngine:
             new_state.growth_momentum = max(new_state.growth_momentum - 0.12 * diminishing, 0.55)
             info["effects"].append(f"Budgets scaled by {scale:.2f}; growth momentum reduced")
             timing_bonus = -0.03 if new_state.day <= 2 else 0.04
+            if (not new_state.tracking_investigated) and new_state.day <= 2:
+                new_state.early_wrong_decision = True
+                timing_bonus -= 0.08
+                info["effects"].append("Wrong early decision: budget reduced before attribution diagnosis")
 
         elif action.action_type == "investigate_attribution":
             if new_state.tracking_investigated and not new_state.uncertainty_reintroduced:
@@ -220,6 +258,9 @@ class SimulationEngine:
                 uncertainty_bonus = 0.09
                 if "tracking_investigated" not in new_state.issues_resolved:
                     new_state.issues_resolved.append("tracking_investigated")
+                if new_state.early_wrong_decision:
+                    new_state.recovered_after_wrong_decision = True
+                    info["effects"].append("Recovery path activated after early budget misstep")
 
         elif action.action_type == "switch_to_modeled_conversions":
             if c.attribution_reporting_mode == "modeled":
@@ -412,8 +453,20 @@ class SimulationEngine:
 
         # Confidence estimate drives risk penalties when acting under poor observability.
         unresolved = len(set(new_state.issues_remaining) - set(new_state.issues_resolved))
+        c.capi_coverage = min(max(c.capi_coverage + (0.28 if c.conversions_api_enabled else -0.03), 0.0), 1.0)
+        c.pixel_match_quality = min(max((0.70 * c.pixel_signal_quality) + (0.30 * new_state.tracking_reliability), 0.0), 1.0)
+        new_state.attribution_confidence = compute_attribution_confidence(
+            pixel_match_quality=c.pixel_match_quality,
+            capi_coverage=c.capi_coverage,
+            ios_traffic_pct=c.ios_traffic_pct,
+        )
         new_state.confidence_score = min(
-            max((0.55 * new_state.tracking_reliability) + (0.35 * (1.0 - _attribution_gap(c))) + (0.10 * (1.0 - min(unresolved / 8.0, 1.0))), 0.0),
+            max(
+                (0.80 * new_state.attribution_confidence)
+                + (0.15 * (1.0 - _attribution_gap(c)))
+                + (0.05 * (1.0 - min(unresolved / 8.0, 1.0))),
+                0.0,
+            ),
             1.0,
         )
         if new_state.confidence_score < 0.55 and action.action_type in {"promote_ad", "reallocate_to_top_performers", "adjust_budget_allocation"}:
@@ -466,6 +519,19 @@ class SimulationEngine:
         reward_components.issue_resolution_progress = round(min(issue_progress * 0.18, 0.12), 4)
         reward_components.redundancy_penalty = round(_redundancy_penalty(action.action_type, action_count), 4)
 
+        # Penalize redundant actions with stronger recency awareness (last 2 steps).
+        recent_redundancy = 0.0
+        if action.action_type in {prev_action, prev2_action} and action.action_type:
+            recent_redundancy -= 0.03
+        reward_components.redundancy_penalty = round(
+            reward_components.redundancy_penalty + recent_redundancy,
+            4,
+        )
+
+        # Encourage action diversity until convergence is reached.
+        if (not converged_before) and action.action_type not in {prev_action, prev2_action}:
+            reward_components.uncertainty_handling = round(reward_components.uncertainty_handling + 0.02, 4)
+
         if new_state.confidence_score < 0.50 and action.action_type not in {"investigate_attribution", "no_op"}:
             reward_components.uncertainty_handling = round(reward_components.uncertainty_handling - 0.05, 4)
             reward_components.redundancy_penalty = round(reward_components.redundancy_penalty - 0.04, 4)
@@ -511,7 +577,7 @@ class SimulationEngine:
         )
 
         # Slight reward-scale stochasticity prevents a single rigid trajectory from always dominating.
-        reward_scale = random.uniform(0.96, 1.04)
+        reward_scale = self.rng.uniform(0.96, 1.04)
 
         immediate_reward = (
             (0.45 * reward_components.action_validity)
@@ -541,6 +607,10 @@ class SimulationEngine:
             or (_all_issues_resolved(new_state) and (new_state.day + 1) >= 2)
             or _is_converged(new_state)
         )
+
+        # Penalize unnecessary steps beyond the task's optimal budget if not done.
+        if ((new_state.step_count + 1) > new_state.optimal_steps) and (not done_candidate):
+            immediate_reward -= 0.05
         if done_candidate:
             final_gap_pred = after_gap
             roas_gain_pred = max((c.true_roas - state.campaign.true_roas) / max(state.campaign.true_roas, 0.01), 0.0)
@@ -565,12 +635,28 @@ class SimulationEngine:
         new_state.terminal_bonus_last_step = round(terminal_bonus, 4)
 
         raw_total = (immediate_reward + delayed_reward + terminal_bonus) * reward_scale
-        # Smoothly squash into [0, 1] to preserve differentiation and avoid reward saturation.
-        if raw_total <= 0.0:
-            total = 0.0
-        else:
-            total = 1.0 - (2.718281828 ** (-0.85 * raw_total))
-        total = round(min(max(total, 0.0), 0.97), 4)
+
+        # Apply diminishing returns on repeated local behavior.
+        repeat_scale = max(0.55, 1.0 - (0.10 * max(repeat_count - 1, 0)))
+        raw_total *= repeat_scale
+
+        # Repeated ineffective actions should be negative (not neutral).
+        ineffective_repeat = same_as_previous and (gap_delta <= 0.001) and (sig_delta <= 0.001) and (roas_delta <= 0.0)
+        if ineffective_repeat:
+            raw_total -= 0.05
+
+        if new_state.early_wrong_decision and (not new_state.recovered_after_wrong_decision):
+            raw_total -= 0.03
+        if new_state.recovered_after_wrong_decision:
+            raw_total += 0.02
+
+        # Medium tasks are intentionally capped to avoid unrealistically high step rewards.
+        if new_state.difficulty == "medium" and raw_total > 0.5:
+            raw_total *= 0.8
+
+        # Smooth squash into [-1, 1] so penalties can produce small negative rewards.
+        total = math.tanh(0.9 * raw_total)
+        total = round(min(max(total, -0.95), 0.95), 4)
 
         reward = Reward(
             total=total,
@@ -593,6 +679,7 @@ class SimulationEngine:
             "step": new_state.step_count,
             "day": new_state.day,
             "action": action.action_type,
+            "reasoning": action.reasoning or "",
             "reward": total,
             "immediate_reward": round(immediate_reward, 4),
             "delayed_reward": round(delayed_reward, 4),
@@ -603,6 +690,8 @@ class SimulationEngine:
             "risk_events": [e for e in info["effects"] if "penalty" in e.lower() or "risk" in e.lower() or "reduced" in e.lower()],
             "effects": info["effects"],
         })
+        if action.reasoning:
+            new_state.reasoning_log.append(action.reasoning)
         new_state.risk_events.extend([e for e in info["effects"] if "penalty" in e.lower() or "risk" in e.lower() or "reduced" in e.lower()])
 
         # ── Check done ────────────────────────────────────────────────────
@@ -629,18 +718,18 @@ class SimulationEngine:
 
         if not state.episode_risk_initialized:
             state.episode_risk_initialized = True
-            if random.random() < random.uniform(0.15, 0.25):
-                event = random.choice(["tracking_drop", "modeled_noise", "delayed_spike"])
+            if self.rng.random() < self.rng.uniform(0.15, 0.25):
+                event = self.rng.choice(["tracking_drop", "modeled_noise", "delayed_spike"])
                 state.risk_events.append(event)
                 if event == "tracking_drop":
-                    state.tracking_reliability = max(state.tracking_reliability - random.uniform(0.10, 0.20), 0.15)
+                    state.tracking_reliability = max(state.tracking_reliability - self.rng.uniform(0.10, 0.20), 0.15)
                 elif event == "delayed_spike":
-                    spike_pool = max(int(state.hidden_conversions_pool * random.uniform(0.10, 0.18)), 6)
+                    spike_pool = max(int(state.hidden_conversions_pool * self.rng.uniform(0.10, 0.18)), 6)
                     if state.campaign.adsets:
                         source_ids = [a.adset_id for a in state.campaign.adsets if not a.is_paused] or [state.campaign.adsets[0].adset_id]
                         state.pending_delayed_conversions.append(
                             PendingConversion(
-                                source_adset_id=random.choice(source_ids),
+                                source_adset_id=self.rng.choice(source_ids),
                                 clicks=spike_pool,
                                 expected_conversions=spike_pool,
                                 value=spike_pool,
@@ -663,14 +752,14 @@ class SimulationEngine:
         effective_tracking_reliability = min(max(state.tracking_reliability + reliability_noise, 0.20), 0.99)
 
         # Controlled stochasticity: small day-to-day drift and rare disruptive events.
-        campaign.ios_traffic_pct = min(max(campaign.ios_traffic_pct + random.uniform(-0.01, 0.01), 0.10), 0.85)
-        if "tracking_drop" not in state.risk_events and random.random() < (0.20 if state.difficulty == "hard" else 0.15):
-            drop = random.uniform(0.10, 0.16)
+        campaign.ios_traffic_pct = min(max(campaign.ios_traffic_pct + self.rng.uniform(-0.01, 0.01), 0.10), 0.85)
+        if "tracking_drop" not in state.risk_events and self.rng.random() < (0.20 if state.difficulty == "hard" else 0.15):
+            drop = self.rng.uniform(0.10, 0.16)
             effective_tracking_reliability = max(effective_tracking_reliability - drop, 0.15)
             state.risk_events.append("tracking_drop")
 
-        if not campaign.conversions_api_enabled and random.random() < 0.22:
-            effective_tracking_reliability = max(effective_tracking_reliability - random.uniform(0.02, 0.06), 0.15)
+        if not campaign.conversions_api_enabled and self.rng.random() < 0.22:
+            effective_tracking_reliability = max(effective_tracking_reliability - self.rng.uniform(0.02, 0.06), 0.15)
             state.risk_events.append("signal_degradation_event")
 
         state.tracking_reliability = effective_tracking_reliability
@@ -837,15 +926,15 @@ class SimulationEngine:
                 easy_boost = 2.80 if state.tracking_investigated else 2.20
                 observed = min(max(int(round(observed * easy_boost)), observed), max(true_conv - modeled, 0))
 
-            if campaign.modeled_conversions_enabled and ("modeled_noise" not in state.risk_events) and random.random() < 0.15:
-                extra_modeled = int(round(modeled * random.uniform(0.10, 0.22)))
+            if campaign.modeled_conversions_enabled and ("modeled_noise" not in state.risk_events) and self.rng.random() < 0.15:
+                extra_modeled = int(round(modeled * self.rng.uniform(0.10, 0.22)))
                 if extra_modeled > 0:
                     modeled += extra_modeled
                     state.risk_events.append("modeled_noise")
                     state.risk_events.append("modeled_overestimation")
 
             if campaign.modeled_conversions_enabled and "modeled_noise" in state.risk_events and state.day <= 2:
-                distortion = random.uniform(0.85, 1.15)
+                distortion = self.rng.uniform(0.85, 1.15)
                 modeled = max(int(round(modeled * distortion)), 0)
 
             campaign.reported_conversions += observed + modeled

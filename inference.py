@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import List, Optional
 
 from openai import OpenAI
@@ -73,6 +74,20 @@ Priority order:
 
 Return ONLY JSON: {"action_type": "...", "parameters": {...}, "reasoning": "..."}
 """.strip()
+
+
+def _load_env_file(env_path: Path) -> None:
+    if not env_path.exists():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if key and os.getenv(key) is None:
+            os.environ[key] = value
 
 
 def _bool_str(value: bool) -> str:
@@ -215,7 +230,7 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
         )
     
     # Priority 4: Switch to modeled reporting when lagged signals are high.
-    if (obs.attribution_gap_pct > 0.35 or "Pending delayed conversions:" in obs.context) and not campaign.modeled_conversions_enabled:
+    if (obs.attribution_gap_pct > 0.35 or obs.pending_delayed_conversions > 0) and not campaign.modeled_conversions_enabled:
         return Action(
             action_type="switch_to_modeled_conversions",
             parameters={},
@@ -435,6 +450,12 @@ def run_task(client: OpenAI, task_id: str) -> int:
 
 
 def main() -> int:
+    global API_BASE_URL, MODEL_NAME, API_KEY
+    _load_env_file(Path(__file__).resolve().with_name(".env"))
+    API_BASE_URL = os.getenv("API_BASE_URL")
+    MODEL_NAME = os.getenv("MODEL_NAME")
+    API_KEY = os.getenv("HF_TOKEN")
+
     missing = []
     if not API_BASE_URL:
         missing.append("API_BASE_URL")
