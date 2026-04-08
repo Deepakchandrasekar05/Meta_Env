@@ -166,7 +166,7 @@ class RewardComponents(BaseModel):
 
 
 class Reward(BaseModel):
-    total: float = Field(ge=-1.0, le=1.0)
+    total: float = Field(ge=0.0, le=1.0)
     components: RewardComponents
     explanation: str = ""
 
@@ -220,3 +220,5 @@ class EnvState(BaseModel):
     risk_events: List[str] = Field(default_factory=list)
     budget_optimization_multiplier: float = 1.0
     confidence_score: float = 0.5
+    episode_risk_initialized: bool = False
+    easy_meaningful_actions_taken: int = 0

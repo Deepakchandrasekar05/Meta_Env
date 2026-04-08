@@ -38,12 +38,18 @@ Return ONLY a JSON object:
 
 class LLMGrader:
     def __init__(self, model: str | None = None):
-        api_key = os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
+        api_key = os.environ.get("HF_TOKEN")
         if not api_key:
-            raise EnvironmentError("HF_TOKEN (or OPENAI_API_KEY) not set")
+            raise EnvironmentError("HF_TOKEN not set")
         base_url = os.environ.get("API_BASE_URL")
+        if not base_url:
+            raise EnvironmentError("API_BASE_URL not set")
         self.client = OpenAI(api_key=api_key, base_url=base_url)
-        self.model = model or os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+        self.model = model or os.environ.get("MODEL_NAME")
+        if not self.model:
+            raise EnvironmentError("MODEL_NAME not set")
+        if self.model != "Qwen/Qwen2.5-72B-Instruct":
+            raise EnvironmentError("MODEL_NAME must be 'Qwen/Qwen2.5-72B-Instruct'")
 
     def grade_trajectory(
         self,

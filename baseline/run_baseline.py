@@ -26,6 +26,20 @@ TASKS = [
 ]
 
 
+def _format_context_for_console(raw_context: str) -> str:
+    """Hide verbose adset breakdown from console while keeping step/issue lines."""
+    marker = "\n\nAdset Performance Breakdown:"
+    if marker not in raw_context:
+        return raw_context
+    head, tail = raw_context.split(marker, 1)
+    step_marker = "\nStep "
+    if step_marker in tail:
+        tail = tail[tail.index(step_marker):]
+    else:
+        tail = ""
+    return head + tail
+
+
 def run_task(task_id: str, agent: BaselineAgent, verbose: bool = True) -> dict:
     env = MetaAdsAttributionEnv(task_id=task_id)
     obs = env.reset()
@@ -34,7 +48,7 @@ def run_task(task_id: str, agent: BaselineAgent, verbose: bool = True) -> dict:
         print(f"\n{'='*60}")
         print(f"TASK: {task_id.upper()}")
         print(f"{'='*60}")
-        print(obs.context)
+        print(_format_context_for_console(obs.context))
         print()
 
     total_reward = 0.0
@@ -76,9 +90,6 @@ def run_task(task_id: str, agent: BaselineAgent, verbose: bool = True) -> dict:
         print("  Breakdown:")
         for k, v in result.breakdown.items():
             print(f"    {k}: {v}")
-        print("  Feedback:")
-        for fb in result.feedback:
-            print(f"    {fb}")
 
     return {
         "task_id":            result.task_id,

@@ -67,12 +67,30 @@ and paused/reallocated any underperforming ones!
 
 class BaselineAgent:
     def __init__(self, model: str | None = None):
-        api_key = os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
+        api_key = os.environ.get("HF_TOKEN")
         base_url = os.environ.get("API_BASE_URL")
         # Keep baseline deterministic/offline by default; opt in via BASELINE_USE_LLM=true.
         self.use_llm = os.environ.get("BASELINE_USE_LLM", "false").strip().lower() in {"1", "true", "yes", "on"}
-        self.client = OpenAI(api_key=api_key, base_url=base_url) if (api_key and self.use_llm) else None
-        self.model = model or os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+        self.model = model or os.environ.get("MODEL_NAME")
+        if self.use_llm:
+            missing = []
+            if not api_key:
+                missing.append("HF_TOKEN")
+            if not base_url:
+                missing.append("API_BASE_URL")
+            if not self.model:
+                missing.append("MODEL_NAME")
+            if missing:
+                raise EnvironmentError(
+                    f"BASELINE_USE_LLM=true requires environment variables: {', '.join(missing)}"
+                )
+            if self.model != "Qwen/Qwen2.5-72B-Instruct":
+                raise EnvironmentError(
+                    "MODEL_NAME must be 'Qwen/Qwen2.5-72B-Instruct' when BASELINE_USE_LLM=true"
+                )
+        self.client = OpenAI(api_key=api_key, base_url=base_url) if self.use_llm else None
+        if not self.model:
+            self.model = "Qwen/Qwen2.5-72B-Instruct"
         self.action_history: list[str] = []
         self.reallocation_count = 0
         self.last_gap: float | None = None

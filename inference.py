@@ -22,9 +22,10 @@ from meta_ads_env.models import Action
 from meta_ads_env.tasks import TASK_REGISTRY
 
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
+API_BASE_URL = os.getenv("API_BASE_URL")
+MODEL_NAME = os.getenv("MODEL_NAME")
+API_KEY = os.getenv("HF_TOKEN")
+REQUIRED_MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 BENCHMARK = "meta_ads_attribution_openenv"
 MAX_TOKENS = 300
 TEMPERATURE = 0.0
@@ -434,9 +435,19 @@ def run_task(client: OpenAI, task_id: str) -> int:
 
 
 def main() -> int:
+    missing = []
+    if not API_BASE_URL:
+        missing.append("API_BASE_URL")
+    if not MODEL_NAME:
+        missing.append("MODEL_NAME")
     if not API_KEY:
-        # Keep behavior explicit for validators/users.
-        raise EnvironmentError("HF_TOKEN (or OPENAI_API_KEY/API_KEY) is required for inference")
+        missing.append("HF_TOKEN")
+    if missing:
+        raise EnvironmentError(f"Missing required environment variables: {', '.join(missing)}")
+    if MODEL_NAME != REQUIRED_MODEL_NAME:
+        raise EnvironmentError(
+            f"MODEL_NAME must be '{REQUIRED_MODEL_NAME}' for this codebase. Got: '{MODEL_NAME}'"
+        )
 
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 

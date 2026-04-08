@@ -64,7 +64,7 @@ def make_easy_task() -> EnvState:
         aem_enabled=False,
         utm_tracking=True,      # UTM at least works
     )
-    true_conv = 180
+    true_conv = int(round(180 + rng.uniform(-12, 14)))
     attr_window = "1d_click"
     reported_conv = compute_reported_conversions(true_conv, attr_window, pixel_quality)
     severity = min(max(rng.uniform(0.92, 1.08), 0.85), 1.15)
@@ -128,7 +128,8 @@ def make_easy_task() -> EnvState:
         ],
     )
 
-    tracking_rel = max(compute_tracking_reliability(campaign, investigation_level=0.0), 0.68)
+    tracking_rel = compute_tracking_reliability(campaign, investigation_level=0.0)
+    tracking_rel = min(max(tracking_rel + rng.uniform(-0.04, 0.04), 0.62), 0.78)
 
     return EnvState(
         task_id="easy_attribution_window",
