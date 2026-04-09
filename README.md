@@ -1,15 +1,15 @@
-# 🎯 Meta Ads Attribution Recovery Environment
+# Meta Ads Attribution Recovery Environment
 
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-Compliant-brightgreen)](https://openenv.dev)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 **An OpenEnv-compliant reinforcement learning environment that models Meta Ads attribution recovery under iOS tracking constraints, narrow attribution windows, and incomplete conversion signals.**
 
-> 🚨 **The Problem**: Meta advertisers lose significant revenue because iOS privacy changes, narrow attribution windows, and browser tracking restrictions leave **40-70% of conversions** untracked. As a result, Meta's optimization system learns from incomplete signals, often overvaluing short-lag outcomes while undervaluing high-performing ads with delayed conversions.
+> **The Problem**: Meta advertisers lose significant revenue because iOS privacy changes, narrow attribution windows, and browser tracking restrictions leave **40-70% of conversions** untracked. As a result, Meta's optimization system learns from incomplete signals, often overvaluing short-lag outcomes while undervaluing high-performing ads with delayed conversions.
 
 ---
 
-## 🔥 The Attribution Crisis Explained
+## The Attribution Crisis Explained
 
 ### What's Breaking Attribution?
 
@@ -21,9 +21,9 @@
 ### The Impact
 
 **Example Campaign:**
-- 📊 **Reported Metrics**: 59 conversions, $76 CPA, 0.98x ROAS → *Appears unprofitable*
-- ✅ **True Performance**: 180 conversions, $25 CPA, 3.0x ROAS → *Actually highly profitable!*
-- ❌ **Attribution Gap**: **67% of conversions untracked**
+- **Reported Metrics**: 59 conversions, $76 CPA, 0.98x ROAS -> *Appears unprofitable*
+- **True Performance**: 180 conversions, $25 CPA, 3.0x ROAS -> *Actually highly profitable!*
+- **Attribution Gap**: **67% of conversions untracked**
 
 **Result**: The optimization loop can pause profitable inventory and over-allocate spend to weaker ad sets.
 
@@ -35,9 +35,9 @@
 
 ---
 
-## 🎮 Environment Overview
+## Environment Overview
 
-### OpenEnv Compliance ✅
+### OpenEnv Compliance
 - **Typed Pydantic models** for Observation, Action, Reward, State
 - **Standard API**: `reset()`, `step(action)`, `state()`
 - **Three difficulty levels** with programmatic graders (0.0–1.0 scoring)
@@ -52,7 +52,7 @@
 
 ---
 
-## 🎯 Action Space
+## Action Space
 
 | Action | Parameters | Use Case |
 |--------|-----------|----------|
@@ -69,7 +69,7 @@
 
 ---
 
-## 👁️ Observation Space
+## Observation Space
 
 ```python
 {
@@ -94,26 +94,26 @@
 
 ---
 
-## 📊 Tasks & Difficulty
+## Tasks & Difficulty
 
-### 🟢 Easy: Attribution Window Fix
+### Easy: Attribution Window Fix
 **Problem**: A 1-day attribution window excludes most delayed conversions.  
 **Solution**: Adjust to 7-day click window  
-**Baseline Score**: 0.893 ✅
+**Baseline Score**: 0.893
 
-### 🟡 Medium: iOS Signal Recovery
+### Medium: iOS Signal Recovery
 **Problem**: High iOS share without CAPI/AEM causes substantial signal loss.  
 **Solution**: Enable CAPI → Enable AEM  
-**Baseline Score**: 0.850 ✅
+**Baseline Score**: 0.850
 
-### 🔴 Hard: Full Attribution Audit
+### Hard: Full Attribution Audit
 **Problem**: Narrow window, high iOS exposure, missing tracking stack, and misallocated budget.  
 **Solution**: Multi-step optimization (5+ actions)  
-**Baseline Score**: 0.794 ✅
+**Baseline Score**: 0.794
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -148,13 +148,13 @@ python baseline/run_baseline.py
 **Expected Output:**
 ```
 TASK: EASY_ATTRIBUTION_WINDOW
-Score: 0.8926 (PASS ✅) | Steps: 5/5
+Score: 0.8926 (PASS) | Steps: 5/5
 
 TASK: MEDIUM_PIXEL_RECOVERY  
-Score: 0.8500 (PASS ✅) | Steps: 4/7
+Score: 0.8500 (PASS) | Steps: 4/7
 
 TASK: HARD_FULL_ATTRIBUTION_AUDIT
-Score: 0.7942 (PASS ✅) | Steps: 7/10
+Score: 0.7942 (PASS) | Steps: 7/10
 
 Average Score: 0.8456
 ```
@@ -199,20 +199,20 @@ if done:
 
 ---
 
-## 📈 Baseline Results
+## Baseline Results
 
 **Model**: Qwen/Qwen2.5-72B-Instruct (OpenAI-compatible interface) | **Temperature**: 0.0
 
 | Task | Score | Pass | Steps | Key Actions |
 |------|-------|------|-------|-------------|
-| Easy | 0.893 | ✅ | 5/5 | Investigate + window fix + convergence handling |
-| Medium | 0.850 | ✅ | 4/7 | Investigate + CAPI + AEM + modeled reporting |
-| Hard | 0.794 | ✅ | 7/10 | Investigate + window + CAPI + AEM + pause + reallocate |
-| **Average** | **0.846** | **100%** | - | **All passing!** 🎉 |
+| Easy | 0.893 | Yes | 5/5 | Investigate + window fix + convergence handling |
+| Medium | 0.850 | Yes | 4/7 | Investigate + CAPI + AEM + modeled reporting |
+| Hard | 0.794 | Yes | 7/10 | Investigate + window + CAPI + AEM + pause + reallocate |
+| **Average** | **0.846** | **100%** | - | **All passing** |
 
 ---
 
-## 🎁 Reward Function
+## Reward Function
 
 Multi-component reward designed to reward meaningful progress:
 
@@ -231,7 +231,7 @@ reward = (
 
 ---
 
-## 🐳 Docker Deployment
+## Docker Deployment
 
 ### Build and Run Locally
 ```bash
@@ -247,7 +247,7 @@ docker run -p 7860:7860 -e API_BASE_URL=https://router.huggingface.co/v1 -e MODE
 
 ---
 
-## 🧪 Inference Workflow
+## Inference Workflow
 
 ### Inference Script
 
@@ -282,7 +282,7 @@ bash scripts/validate-submission.sh <your_space_url> .
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 meta-ads-openenv/
@@ -321,7 +321,7 @@ meta-ads-openenv/
 
 ---
 
-## 🔬 Advanced Usage
+## Advanced Usage
 
 ### Validate OpenEnv Compliance
 ```bash
@@ -356,13 +356,7 @@ result = grader.grade_trajectory(
 
 ---
 
-## 📄 License
-
-MIT License - a permissive license that allows use, modification, and distribution with attribution. See LICENSE for full terms.
-
----
-
-## 🙏 Acknowledgments
+## Acknowledgments
 
 Built to demonstrate how AI agents can solve high-impact marketing optimization problems in realistic attribution environments. Inspired by real Meta Ads attribution challenges faced by performance teams at scale.
 
@@ -372,4 +366,4 @@ Built to demonstrate how AI agents can solve high-impact marketing optimization 
 
 ---
 
-**🚀 Making attribution-aware AI optimization practical and measurable**
+**Making attribution-aware AI optimization practical and measurable**
