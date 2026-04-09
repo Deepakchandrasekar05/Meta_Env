@@ -341,7 +341,7 @@ for episode in range(100):
         your_policy.update(obs, action, reward)
 ```
 
-### LLM-as-Judge Evaluation
+### LLM Scoring
 ```python
 from evaluation.llm_grader import LLMGrader
 
