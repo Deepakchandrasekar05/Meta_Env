@@ -10,7 +10,7 @@
 #   - curl (usually pre-installed)
 #
 # Run:
-#   curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/validate-submission.sh | bash -s -- <ping_url> [repo_dir]
+#   curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/validate-submission.sh | bash -s -- <ping_url> [repo_dir]
 #
 #   Or download and run locally:
 #     chmod +x validate-submission.sh

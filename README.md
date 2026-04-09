@@ -159,11 +159,11 @@ Score: 0.7942 (PASS) | Steps: 7/10
 Average Score: 0.8456
 ```
 
-### Launch Demo UI
+### Launch Web UI
 
 ```bash
-python app/app.py
-# Open browser to http://127.0.0.1:7860
+python -m server.app
+# Open browser to http://127.0.0.1:8000/web
 ```
 
 ### Use Programmatically
@@ -277,7 +277,7 @@ This structured output is designed for easy monitoring, reproducible evaluation,
 
 ### Validate Submission
 ```bash
-bash scripts/validate-submission.sh <your_space_url> .
+bash validate-submission.sh <your_space_url> .
 ```
 
 ---
@@ -299,11 +299,6 @@ meta-ads-openenv/
 │   ├── grader.py            # Task graders
 │   └── tasks.py             # Task definitions
 │
-├── data/                    # Task scenarios
-│   ├── easy_ads.json
-│   ├── medium_ads.json
-│   └── hard_ads.json
-│
 ├── baseline/                # Baseline agent
 │   ├── baseline_agent.py    # LLM-powered agent
 │   └── run_baseline.py      # Evaluation script
@@ -312,11 +307,7 @@ meta-ads-openenv/
 │   ├── llm_grader.py       # Optional LLM-as-judge
 │   └── metrics.py          # Aggregate metrics
 │
-├── app/                     # Demo UI
-│   └── app.py              # Gradio interface
-│
-└── scripts/                 # Utilities
-    └── validate-submission.sh
+└── validate-submission.sh   # Submission validator
 ```
 
 ---

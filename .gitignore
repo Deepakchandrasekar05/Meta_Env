@@ -1,8 +1,8 @@
 venv/
 .env
+.env.example
 __pycache__/
 *.egg-info/
 server/__pycache__/
 baseline/__pycache__/
-app/__pycache__/
 evaluation/__pycache__/

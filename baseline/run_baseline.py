@@ -4,11 +4,10 @@ run_baseline.py — Reproducible baseline evaluation across all 3 tasks.
 Usage:
     OPENAI_API_KEY=sk-... python baseline/run_baseline.py
 
-Produces a score table and saves results to baseline_results.json.
+Produces a score table in console output.
 """
 
 from __future__ import annotations
-import json
 import sys
 import os
 
@@ -133,11 +132,6 @@ def main():
     print("-" * 60)
     print(f"{'AVERAGE':<35} {avg:>7.4f}")
     print()
-
-    out_path = os.path.join(os.path.dirname(__file__), "baseline_results.json")
-    with open(out_path, "w") as f:
-        json.dump({"results": all_results, "average_score": round(avg, 4)}, f, indent=2)
-    print(f"Results saved to {out_path}")
 
 
 if __name__ == "__main__":
