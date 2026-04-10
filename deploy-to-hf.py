@@ -6,7 +6,7 @@ import os
 login(token=os.getenv("HF_TOKEN")) 
 
 REPO_ID = "agent-zero/meta-ads-attribution-env"
-SPACE_SDK = "gradio"
+SPACE_SDK = "docker"
 
 api = HfApi()
 
