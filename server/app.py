@@ -167,9 +167,9 @@ def _reward_payload(reward) -> dict:
     return reward.model_dump()
 
 
-@app.get("/")
-def root() -> RedirectResponse:
-    return RedirectResponse(url="/web", status_code=307)
+# @app.get("/")
+# def root() -> RedirectResponse:
+#     return RedirectResponse(url="/web", status_code=307)
 
 
 @app.get("/health")
