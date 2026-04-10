@@ -131,7 +131,7 @@ with gr.Blocks(title="Meta Ads RL Playground") as demo:
     state_btn.click(get_state_gradio, outputs=output_box)
 
 
-app = gr.mount_gradio_app(app, demo, path="/")
+app = gr.mount_gradio_app(app, demo, path="/web")
 
 
 class ResetRequest(BaseModel):
