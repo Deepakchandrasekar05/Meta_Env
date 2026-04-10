@@ -276,7 +276,7 @@ def delete_session(session_id: str) -> dict:
 
 def main() -> None:
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", "7860"))
     # Use the in-process app object so direct execution via python server/app.py works.
     uvicorn.run(app, host=host, port=port, reload=False)
 
