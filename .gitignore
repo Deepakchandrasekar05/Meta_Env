@@ -6,3 +6,4 @@ __pycache__/
 server/__pycache__/
 baseline/__pycache__/
 evaluation/__pycache__/
+deploy-to-hy.py
