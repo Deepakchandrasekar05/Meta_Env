@@ -26,7 +26,7 @@ from meta_ads_env.tasks import TASK_REGISTRY
 DEFAULT_API_BASE_URL = "https://router.huggingface.co/v1"
 API_BASE_URL = os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL)
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-API_KEY = os.getenv("HF_TOKEN")
+API_KEY = os.getenv("HF_TOKEN","")
 REQUIRED_MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 BENCHMARK = "meta_ads_attribution_openenv"
 MAX_TOKENS = 300
