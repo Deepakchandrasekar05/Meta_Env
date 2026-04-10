@@ -8,7 +8,7 @@ from uuid import uuid4
 import gradio as gr
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 import uvicorn
 
 from meta_ads_env import MetaAdsAttributionEnv
@@ -135,10 +135,15 @@ with gr.Blocks(title="Meta Ads RL Playground") as demo:
 app = gr.mount_gradio_app(app, demo, path="/web")
 
 
-
 class ResetRequest(BaseModel):
-    task_id: str = "easy_attribution_window"
-    session_id: str | None = None
+    task_id: str = Field(
+        default="easy_attribution_window",
+        validation_alias=AliasChoices("task_id", "task"),
+    )
+    session_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("session_id", "session"),
+    )
 
 
 class StepRequest(BaseModel):
@@ -188,7 +193,9 @@ def tasks() -> dict:
 
 
 @app.post("/reset")
-def reset_episode(req: ResetRequest) -> dict:
+def reset_episode(req: ResetRequest | None = None) -> dict:
+    req = req or ResetRequest()
+
     if req.task_id not in TASK_REGISTRY:
         raise HTTPException(
             status_code=400,
