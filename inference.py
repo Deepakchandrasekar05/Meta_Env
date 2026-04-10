@@ -24,8 +24,18 @@ from meta_ads_env.tasks import TASK_REGISTRY
 
 
 DEFAULT_API_BASE_URL = "https://router.huggingface.co/v1"
-API_BASE_URL = os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL)
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+
+
+def _env_or_default(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    value = value.strip()
+    return value or default
+
+
+API_BASE_URL = _env_or_default("API_BASE_URL", DEFAULT_API_BASE_URL)
+MODEL_NAME = _env_or_default("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 API_KEY = os.getenv("HF_TOKEN","")
 REQUIRED_MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 BENCHMARK = "meta_ads_attribution_openenv"
@@ -87,7 +97,8 @@ def _load_env_file(env_path: Path) -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip()
-        if key and os.getenv(key) is None:
+        # Treat empty values as unset so .env defaults can populate them.
+        if key and not os.getenv(key):
             os.environ[key] = value
 
 
@@ -453,8 +464,8 @@ def run_task(client: OpenAI, task_id: str) -> int:
 def main() -> int:
     global API_BASE_URL, MODEL_NAME, API_KEY
     _load_env_file(Path(__file__).resolve().with_name(".env"))
-    API_BASE_URL = os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL)
-    MODEL_NAME = os.getenv("MODEL_NAME", REQUIRED_MODEL_NAME)
+    API_BASE_URL = _env_or_default("API_BASE_URL", DEFAULT_API_BASE_URL)
+    MODEL_NAME = _env_or_default("MODEL_NAME", REQUIRED_MODEL_NAME)
     API_KEY = os.getenv("HF_TOKEN")
 
     missing = []
