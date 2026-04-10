@@ -1,3 +1,12 @@
+---
+title: Meta Ads Attribution Environment
+emoji: 📈
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: true
+---
+
 # Meta Ads Attribution Recovery Environment
 
 [![OpenEnv](https://img.shields.io/badge/OpenEnv-Compliant-brightgreen)](https://openenv.dev)

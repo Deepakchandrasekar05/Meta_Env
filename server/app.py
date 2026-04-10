@@ -37,7 +37,6 @@ ACTION_CHOICES = [
     "no_op",
 ]
 
-
 def reset_env(task_id: str) -> str:
     global _GRADIO_ENV
     _GRADIO_ENV = MetaAdsAttributionEnv(task_id=task_id)
@@ -132,7 +131,7 @@ with gr.Blocks(title="Meta Ads RL Playground") as demo:
     state_btn.click(get_state_gradio, outputs=output_box)
 
 
-app = gr.mount_gradio_app(app, demo, path="/web")
+app = gr.mount_gradio_app(app, demo, path="/")
 
 
 class ResetRequest(BaseModel):
@@ -277,7 +276,7 @@ def delete_session(session_id: str) -> dict:
 
 def main() -> None:
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", "7860"))
     # Use the in-process app object so direct execution via python server/app.py works.
     uvicorn.run(app, host=host, port=port, reload=False)
 
