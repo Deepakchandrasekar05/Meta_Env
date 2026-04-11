@@ -1,7 +1,6 @@
 """Campaign simulation engine with delayed causal attribution dynamics."""
 
 from __future__ import annotations
-import math
 import random
 from typing import Dict, List, Tuple
 
@@ -165,16 +164,6 @@ class SimulationEngine:
         reward_components = RewardComponents()
         info: Dict = {"action_applied": action.action_type, "effects": []}
 
-        # Deterministic noise source: same task + same action trajectory => same outputs.
-        deterministic_seed = (
-            int(new_state.random_seed)
-            + ((new_state.day + 1) * 997)
-            + ((new_state.step_count + 1) * 211)
-            + (sum(ord(ch) for ch in action.action_type) * 3)
-            + (len(new_state.history) * 17)
-        )
-        self.rng.seed(deterministic_seed)
-
         # ── Snapshot before ──────────────────────────────────────────────
         before_gap = _attribution_gap(c)
         before_signal = state.tracking_reliability
@@ -187,43 +176,57 @@ class SimulationEngine:
         valid = True
         action_count = new_state.action_counts.get(action.action_type, 0) + 1
         new_state.action_counts[action.action_type] = action_count
-        prev_action = new_state.history[-1]["action"] if new_state.history else ""
+        prev_action = new_state.last_action_type or (new_state.history[-1]["action"] if new_state.history else "")
         prev2_action = new_state.history[-2]["action"] if len(new_state.history) >= 2 else ""
-        same_as_previous = action.action_type == prev_action and action.action_type != ""
-        repeat_count = 1
+        same_as_previous = bool(action.action_type) and (action.action_type == prev_action)
         if same_as_previous:
-            repeat_count = 2
-            if action.action_type == prev2_action:
-                repeat_count = 3
+            repeat_count = new_state.repeated_action_count + 1
+        else:
+            repeat_count = 1
+        new_state.last_action_type = action.action_type
+        new_state.repeated_action_count = repeat_count
         if action.action_type != "no_op":
             new_state.easy_meaningful_actions_taken += 1
         diminishing = _diminishing_returns(action_count)
+        effect_scale = self.rng.uniform(0.90, 1.10)
         timing_bonus = 0.0
         uncertainty_bonus = 0.0
         delayed_release_bonus = 0.0
         stable_stack = _is_stack_stable(new_state)
 
         if action.action_type == "promote_ad":
-            if not stable_stack:
+            promote_ready = (
+                stable_stack
+                and new_state.tracking_reliability >= 0.80
+                and _attribution_gap(c) <= 0.18
+                and new_state.tracking_investigated
+            )
+            if not promote_ready:
                 valid = False
-                timing_bonus = -0.10
+                timing_bonus = -0.18
                 uncertainty_bonus = min(uncertainty_bonus, -0.04)
-                info["effects"].append("Promotion blocked: stack not stabilized")
+                new_state.growth_momentum = max(new_state.growth_momentum - 0.05, 0.45)
+                info["effects"].append("Promotion blocked: system not yet optimized")
             else:
                 lift = 0.18 * diminishing
                 if new_state.tracking_reliability < 0.72:
                     # Risky scaling under low confidence can backfire later.
-                    lift *= 0.65
-                    timing_bonus -= 0.06
+                    lift *= 0.35
+                    timing_bonus -= 0.12
                     new_state.risk_events.append("early_scale_risk")
                     info["effects"].append("Risk event: early scaling under low tracking confidence")
                     new_state.budget_optimization_multiplier = max(new_state.budget_optimization_multiplier - 0.10, 0.80)
                 if not new_state.tracking_investigated:
-                    lift *= 0.75
-                    timing_bonus -= 0.05
-                    uncertainty_bonus -= 0.03
+                    lift *= 0.30
+                    timing_bonus -= 0.12
+                    uncertainty_bonus -= 0.08
                     new_state.risk_events.append("promote_before_tracking_fix")
                     info["effects"].append("Promotion before tracking fix reduced future conversion quality")
+                if new_state.tracking_reliability < 0.60:
+                    valid = False
+                    lift = min(lift, 0.0)
+                    new_state.growth_momentum = max(new_state.growth_momentum - 0.08, 0.40)
+                    info["effects"].append("Promotion under low signal quality caused negative lift")
                 new_state.growth_momentum = min(new_state.growth_momentum + lift, 1.8)
                 info["effects"].append(f"Promotion lift applied (+{lift:.2f} momentum)")
                 timing_bonus = 0.12
@@ -248,7 +251,7 @@ class SimulationEngine:
                 uncertainty_bonus = -0.06
                 info["effects"].append("Redundant investigation (no new uncertainty)")
             else:
-                gain = 0.22 * diminishing
+                gain = 0.22 * diminishing * effect_scale
                 new_state.attribution_investigation_level = min(
                     new_state.attribution_investigation_level + gain, 1.0
                 )
@@ -270,7 +273,7 @@ class SimulationEngine:
             else:
                 c.modeled_conversions_enabled = True
                 c.attribution_reporting_mode = "modeled"
-                new_state.growth_momentum = min(new_state.growth_momentum + (0.06 * diminishing), 1.9)
+                new_state.growth_momentum = min(new_state.growth_momentum + (0.06 * diminishing * effect_scale), 1.9)
                 recovered_total = new_state.tracked_conversions_total + new_state.modeled_conversions_total
                 if recovered_total > 0:
                     target_modeled_share = 0.30 if c.aem_enabled else 0.22
@@ -284,12 +287,12 @@ class SimulationEngine:
                 uncertainty_bonus = 0.06
                 if (not c.conversions_api_enabled) or (not c.aem_enabled) or (not new_state.tracking_investigated):
                     # Premature modeled mode leads to noisier optimization and weaker signal trust.
-                    timing_bonus -= 0.12
-                    uncertainty_bonus -= 0.08
+                    timing_bonus -= 0.18
+                    uncertainty_bonus -= 0.12
                     new_state.growth_momentum = max(new_state.growth_momentum - 0.06, 0.55)
                     info["effects"].append("Modeled reporting switched too early; quality penalty applied")
                 if not c.aem_enabled:
-                    uncertainty_bonus -= 0.06
+                    uncertainty_bonus -= 0.12
                     new_state.risk_events.append("modeled_before_aem")
                     info["effects"].append("Modeled reporting before AEM introduced noisy signal")
                 if "modeled_reporting" not in new_state.issues_resolved:
@@ -299,7 +302,7 @@ class SimulationEngine:
             window = action.parameters.get("window", "7d_click")
             if window in WINDOW_COVERAGE and window != c.attribution_window:
                 c.attribution_window = window
-                new_state.growth_momentum = min(new_state.growth_momentum + (0.05 * diminishing), 1.9)
+                new_state.growth_momentum = min(new_state.growth_momentum + (0.05 * diminishing * effect_scale), 1.9)
                 info["effects"].append(f"Attribution window changed to {window}")
                 if "attribution_window" not in new_state.issues_resolved:
                     new_state.issues_resolved.append("attribution_window")
@@ -310,7 +313,7 @@ class SimulationEngine:
         elif action.action_type == "enable_conversions_api":
             if not c.conversions_api_enabled:
                 c.conversions_api_enabled = True
-                new_state.growth_momentum = min(new_state.growth_momentum + (0.08 * diminishing), 1.9)
+                new_state.growth_momentum = min(new_state.growth_momentum + (0.08 * diminishing * effect_scale), 1.9)
                 info["effects"].append("Conversions API enabled")
                 if "conversions_api" not in new_state.issues_resolved:
                     new_state.issues_resolved.append("conversions_api")
@@ -321,7 +324,7 @@ class SimulationEngine:
         elif action.action_type == "enable_aggregated_event_measurement":
             if not c.aem_enabled:
                 c.aem_enabled = True
-                new_state.growth_momentum = min(new_state.growth_momentum + (0.07 * diminishing), 1.9)
+                new_state.growth_momentum = min(new_state.growth_momentum + (0.07 * diminishing * effect_scale), 1.9)
                 info["effects"].append("AEM enabled")
                 if "aem" not in new_state.issues_resolved:
                     new_state.issues_resolved.append("aem")
@@ -332,7 +335,7 @@ class SimulationEngine:
         elif action.action_type == "add_utm_tracking":
             if not c.utm_tracking:
                 c.utm_tracking = True
-                new_state.growth_momentum = min(new_state.growth_momentum + (0.04 * diminishing), 1.9)
+                new_state.growth_momentum = min(new_state.growth_momentum + (0.04 * diminishing * effect_scale), 1.9)
                 info["effects"].append("UTM parameters added")
                 if "utm_tracking" not in new_state.issues_resolved:
                     new_state.issues_resolved.append("utm_tracking")
@@ -356,16 +359,17 @@ class SimulationEngine:
             if "paused_bad_adsets" in new_state.issues_remaining and "paused_bad_adsets" not in new_state.issues_resolved:
                 timing_bonus -= 0.05
             if moved_any and ((not new_state.tracking_investigated) or (not c.conversions_api_enabled)):
-                timing_bonus -= 0.12
+                timing_bonus -= 0.18
                 new_state.growth_momentum = max(new_state.growth_momentum - 0.05, 0.55)
                 new_state.risk_events.append("premature_budget_shift")
                 info["effects"].append("Budget shift before attribution fixes reduced future efficiency")
             if moved_any:
                 # Budget mix changes compound over future steps once tracking quality is usable.
                 compounding_gain = 0.14 if new_state.tracking_investigated else 0.08
+                dependency_scale = 1.0 if (new_state.tracking_investigated and c.conversions_api_enabled) else 0.35
                 new_state.budget_optimization_multiplier = min(
-                    new_state.budget_optimization_multiplier + (compounding_gain * diminishing),
-                    1.85,
+                    new_state.budget_optimization_multiplier + (compounding_gain * diminishing * dependency_scale * effect_scale),
+                    1.95,
                 )
 
         elif action.action_type == "pause_underperforming_adsets":
@@ -386,9 +390,10 @@ class SimulationEngine:
                 momentum_gain = min(0.04 + (0.02 * len(paused)), 0.12)
                 new_state.growth_momentum = min(new_state.growth_momentum + momentum_gain, 1.9)
                 c.budget_spent = max(c.budget_spent - wasted_spend_cut, 0.0)
+                dependency_scale = 1.0 if (new_state.tracking_investigated and c.conversions_api_enabled) else 0.30
                 new_state.budget_optimization_multiplier = min(
-                    new_state.budget_optimization_multiplier + (0.10 * diminishing),
-                    1.85,
+                    new_state.budget_optimization_multiplier + (0.16 * diminishing * dependency_scale * effect_scale),
+                    1.95,
                 )
                 info["effects"].append(f"Waste reduction applied (${wasted_spend_cut:.0f})")
             if not paused:
@@ -417,13 +422,13 @@ class SimulationEngine:
                 if "paused_bad_adsets" in new_state.issues_remaining and "paused_bad_adsets" not in new_state.issues_resolved:
                     timing_bonus -= 0.05
                 if (not new_state.tracking_investigated) or (not c.conversions_api_enabled):
-                    timing_bonus -= 0.14
+                    timing_bonus -= 0.20
                     new_state.growth_momentum = max(new_state.growth_momentum - 0.06, 0.55)
                     new_state.risk_events.append("premature_reallocation")
                     info["effects"].append("Premature reallocation penalty: attribution stack not ready")
                 else:
                     new_state.budget_optimization_multiplier = min(
-                        new_state.budget_optimization_multiplier + (0.18 * diminishing),
+                        new_state.budget_optimization_multiplier + (0.24 * diminishing * effect_scale),
                         1.95,
                     )
 
@@ -450,6 +455,13 @@ class SimulationEngine:
         }:
             timing_bonus -= 0.08
             uncertainty_bonus -= 0.04
+
+        if (not new_state.tracking_investigated) and (new_state.day <= 2) and action.action_type != "investigate_attribution":
+            timing_bonus -= 0.07
+            uncertainty_bonus -= 0.06
+            new_state.attribution_confidence = max(new_state.attribution_confidence - 0.05, 0.0)
+            new_state.confidence_score = max(new_state.confidence_score - 0.06, 0.0)
+            info["effects"].append("Skipped investigation reduced diagnostic confidence")
 
         # Confidence estimate drives risk penalties when acting under poor observability.
         unresolved = len(set(new_state.issues_remaining) - set(new_state.issues_resolved))
@@ -490,9 +502,19 @@ class SimulationEngine:
             c,
             new_state.attribution_investigation_level,
         )
+        new_state.tracking_reliability = min(
+            max(new_state.tracking_reliability + self.rng.uniform(-0.03, 0.03), 0.15),
+            0.99,
+        )
 
         # Causal daily transition: impressions -> clicks -> delayed conversions -> observed signals.
+        risk_events_before = len(new_state.risk_events)
         self._simulate_day(new_state, avg_order_value)
+        if len(new_state.risk_events) > risk_events_before:
+            new_events = new_state.risk_events[risk_events_before:]
+            if new_events:
+                info["risk_event"] = new_events[-1]
+                info["effects"].append(f"Risk event observed: {new_events[-1]}")
 
         # ── Compute reward ────────────────────────────────────────────────
         after_gap    = _attribution_gap(c)
@@ -518,6 +540,14 @@ class SimulationEngine:
         reward_components.long_term_gain = round(max(min((momentum_delta * 0.26) + (0.08 * delayed_recovery), 0.14), -0.10), 4)
         reward_components.issue_resolution_progress = round(min(issue_progress * 0.18, 0.12), 4)
         reward_components.redundancy_penalty = round(_redundancy_penalty(action.action_type, action_count), 4)
+
+        repetition_penalty = -0.05 * repeat_count
+        if repeat_count >= 3:
+            repetition_penalty -= 0.15
+        reward_components.redundancy_penalty = round(
+            reward_components.redundancy_penalty + repetition_penalty,
+            4,
+        )
 
         # Penalize redundant actions with stronger recency awareness (last 2 steps).
         recent_redundancy = 0.0
@@ -567,17 +597,20 @@ class SimulationEngine:
 
         if converged_before and action.action_type != "no_op":
             reward_components.redundancy_penalty = round(reward_components.redundancy_penalty - 0.08, 4)
+            reward_components.timing_quality = round(reward_components.timing_quality - 0.08, 4)
 
         if new_state.day >= (new_state.max_steps - 2) and action.action_type in {"add_utm_tracking", "segment_audience", "change_bid_strategy"}:
             reward_components.redundancy_penalty = round(reward_components.redundancy_penalty - 0.05, 4)
 
+        ordering_component = _ordering_bonus(new_state, action.action_type) * self.rng.uniform(0.85, 1.15)
+        if valid and (gap_delta > 0.008 or sig_delta > 0.008 or roas_delta > 0.04):
+            ordering_component += 0.01
         reward_components.timing_quality = round(
-            reward_components.timing_quality + _ordering_bonus(new_state, action.action_type) + delayed_release_bonus + (0.03 * early_factor),
+            reward_components.timing_quality + ordering_component + delayed_release_bonus + (0.03 * early_factor),
             4,
         )
 
-        # Slight reward-scale stochasticity prevents a single rigid trajectory from always dominating.
-        reward_scale = self.rng.uniform(0.96, 1.04)
+        reward_scale = self.rng.uniform(0.95, 1.05)
 
         immediate_reward = (
             (0.45 * reward_components.action_validity)
@@ -586,8 +619,12 @@ class SimulationEngine:
             + (0.35 * reward_components.uncertainty_handling)
             + (0.60 * reward_components.redundancy_penalty)
         )
-        step_penalty = 0.02
+        step_penalty = 0.03
         immediate_reward -= step_penalty
+        immediate_reward -= (0.05 * repeat_count)
+        if repeat_count >= 3:
+            immediate_reward -= 0.15
+            info["effects"].append("Hard repetition penalty applied")
         delayed_credit = (
             (0.80 * reward_components.attribution_accuracy)
             + (0.80 * reward_components.roas_improvement)
@@ -607,10 +644,31 @@ class SimulationEngine:
             or (_all_issues_resolved(new_state) and (new_state.day + 1) >= 2)
             or _is_converged(new_state)
         )
+        if _major_issues_resolved(new_state) and _is_near_optimal(new_state):
+            done_candidate = True
+            info["effects"].append("Episode terminated: major issues resolved and system near optimal")
 
-        # Penalize unnecessary steps beyond the task's optimal budget if not done.
-        if ((new_state.step_count + 1) > new_state.optimal_steps) and (not done_candidate):
-            immediate_reward -= 0.05
+        overall_delta = gap_delta + sig_delta + max(roas_delta, 0.0) * 0.20
+        convergence_delta_threshold = 0.008
+        if overall_delta < convergence_delta_threshold:
+            new_state.convergence_stagnation_count += 1
+        else:
+            new_state.convergence_stagnation_count = 0
+        if (new_state.day + 1) >= 3 and new_state.convergence_stagnation_count >= 2:
+            done_candidate = True
+            info["effects"].append("Episode terminated on negligible improvement convergence")
+        elif (new_state.day + 1) >= 3 and new_state.convergence_stagnation_count >= 1 and _metrics_stable(new_state):
+            if self.rng.random() < 0.40:
+                done_candidate = True
+                info["effects"].append("Episode terminated on soft convergence")
+
+        overrun_steps = max((new_state.step_count + 1) - new_state.optimal_steps, 0)
+        if overrun_steps > 0:
+            extra_efficiency_penalty = min(0.03 * overrun_steps, 0.15)
+            immediate_reward -= extra_efficiency_penalty
+            info["effects"].append(f"Efficiency penalty applied ({extra_efficiency_penalty:.2f})")
+        if converged_before and action.action_type != "no_op":
+            immediate_reward -= 0.06
         if done_candidate:
             final_gap_pred = after_gap
             roas_gain_pred = max((c.true_roas - state.campaign.true_roas) / max(state.campaign.true_roas, 0.01), 0.0)
@@ -630,11 +688,23 @@ class SimulationEngine:
                 terminal_bonus += 0.08
             elif (new_state.step_count + 1) >= (new_state.max_steps - 1):
                 terminal_bonus -= 0.08
+            if (new_state.step_count + 1) <= max(new_state.optimal_steps - 1, 1):
+                terminal_bonus += 0.10
             if converged_before and action.action_type != "no_op":
                 terminal_bonus -= 0.05
+        terminal_bonus *= 0.80
         new_state.terminal_bonus_last_step = round(terminal_bonus, 4)
 
-        raw_total = (immediate_reward + delayed_reward + terminal_bonus) * reward_scale
+        raw_total = ((immediate_reward * 0.60) + (delayed_reward * 1.20) + (terminal_bonus * 1.30)) * reward_scale
+
+        no_effect_action = (gap_delta < 0.003) and (sig_delta < 0.003) and (abs(roas_delta) < 0.03)
+        if no_effect_action:
+            raw_total -= 0.05
+            info["effects"].append("No measurable improvement penalty applied")
+
+        if no_effect_action:
+            raw_total *= 0.40
+            info["effects"].append("Late-stage negligible-improvement dampening applied")
 
         # Apply diminishing returns on repeated local behavior.
         repeat_scale = max(0.55, 1.0 - (0.10 * max(repeat_count - 1, 0)))
@@ -645,6 +715,20 @@ class SimulationEngine:
         if ineffective_repeat:
             raw_total -= 0.05
 
+        if action.action_type == "promote_ad" and not stable_stack:
+            raw_total -= 0.12
+            info["effects"].append("Premature promotion penalty applied")
+
+        if new_state.difficulty == "hard" and _all_issues_resolved(new_state):
+            allowed_post_opt = {"reallocate_to_top_performers", "pause_underperforming_adsets", "adjust_budget_allocation", "no_op"}
+            if action.action_type not in allowed_post_opt:
+                raw_total -= 0.06
+                info["effects"].append("Post-optimization meaningless action penalty applied")
+
+        if _is_near_optimal(new_state) and action.action_type != "no_op":
+            raw_total -= 0.05
+            info["effects"].append("Late-stage unnecessary action penalty applied")
+
         if new_state.early_wrong_decision and (not new_state.recovered_after_wrong_decision):
             raw_total -= 0.03
         if new_state.recovered_after_wrong_decision:
@@ -654,9 +738,24 @@ class SimulationEngine:
         if new_state.difficulty == "medium" and raw_total > 0.5:
             raw_total *= 0.8
 
-        # Smooth squash into [-1, 1] so penalties can produce small negative rewards.
-        total = math.tanh(0.9 * raw_total)
-        total = round(min(max(total, -0.95), 0.95), 4)
+        # Explicit reward normalization for stable learning and predictable penalties.
+        total = round(min(max(raw_total, -0.2), 1.0), 4)
+
+        if action.action_type == "no_op":
+            solved_state = _all_issues_resolved(new_state) and _is_converged(new_state)
+            if solved_state:
+                total = min(total, 0.02)
+                total = max(total, 0.005)
+                info["effects"].append("no_op accepted: system already optimized")
+            else:
+                inactivity_penalty = -0.02 - min(0.01 * max(repeat_count - 1, 0), 0.03)
+                total = min(total, inactivity_penalty)
+                total = max(total, -0.05)
+                info["effects"].append("no_op inactivity penalty applied")
+
+        if action.action_type == "investigate_attribution":
+            total = max(total, 0.02)
+            info["effects"].append("Investigate action floor reward applied")
 
         reward = Reward(
             total=total,
@@ -664,7 +763,7 @@ class SimulationEngine:
             explanation=(
                 f"day={new_state.day} gap_delta={gap_delta:.2%} signal_delta={sig_delta:.2%} "
                 f"roas_delta={roas_delta:.2f} momentum={new_state.growth_momentum:.2f} "
-                f"repeat_count={action_count} immediate={immediate_reward:.3f} delayed={delayed_reward:.3f} terminal={terminal_bonus:.3f} reward_scale={reward_scale:.3f} raw_total={raw_total:.3f} confidence={new_state.confidence_score:.2f}"
+                f"repeat_count={repeat_count} immediate={immediate_reward:.3f} delayed={delayed_reward:.3f} terminal={terminal_bonus:.3f} reward_scale={reward_scale:.3f} raw_total={raw_total:.3f} confidence={new_state.confidence_score:.2f}"
             ),
         )
 
@@ -702,7 +801,10 @@ class SimulationEngine:
         )
         done = (
             new_state.step_count >= new_state.max_steps
+            or done_candidate
             or (_all_issues_resolved(new_state) and new_state.day >= min_steps_required and easy_action_gate)
+            or (_major_issues_resolved(new_state) and _is_near_optimal(new_state))
+            or (new_state.convergence_stagnation_count >= 2 and _metrics_stable(new_state))
             or (_is_converged(new_state) and easy_action_gate)
         )
         if done and _is_converged(new_state):
@@ -718,12 +820,13 @@ class SimulationEngine:
 
         if not state.episode_risk_initialized:
             state.episode_risk_initialized = True
-            if self.rng.random() < self.rng.uniform(0.15, 0.25):
-                event = self.rng.choice(["tracking_drop", "modeled_noise", "delayed_spike"])
+            if self.rng.random() < self.rng.uniform(0.10, 0.15):
+                event = self.rng.choice(["tracking_drop", "modeled_noise", "delay_spike"])
                 state.risk_events.append(event)
+                state.episode_rare_events.append(event)
                 if event == "tracking_drop":
                     state.tracking_reliability = max(state.tracking_reliability - self.rng.uniform(0.10, 0.20), 0.15)
-                elif event == "delayed_spike":
+                elif event == "delay_spike":
                     spike_pool = max(int(state.hidden_conversions_pool * self.rng.uniform(0.10, 0.18)), 6)
                     if state.campaign.adsets:
                         source_ids = [a.adset_id for a in state.campaign.adsets if not a.is_paused] or [state.campaign.adsets[0].adset_id]
@@ -739,21 +842,21 @@ class SimulationEngine:
                         )
 
         if state.difficulty == "easy":
-            reliability_amp = 0.015
-            delay_jitter_amp = 0.022
+            reliability_amp = 0.05
+            delay_jitter_amp = 0.04
         elif state.difficulty == "medium":
-            reliability_amp = 0.035
-            delay_jitter_amp = 0.040
+            reliability_amp = 0.08
+            delay_jitter_amp = 0.06
         else:
-            reliability_amp = 0.050
-            delay_jitter_amp = 0.055
+            reliability_amp = 0.10
+            delay_jitter_amp = 0.08
 
-        reliability_noise = _deterministic_noise((day_seed * 97) + len(campaign.adsets), reliability_amp)
+        reliability_noise = self.rng.uniform(-reliability_amp, reliability_amp)
         effective_tracking_reliability = min(max(state.tracking_reliability + reliability_noise, 0.20), 0.99)
 
         # Controlled stochasticity: small day-to-day drift and rare disruptive events.
         campaign.ios_traffic_pct = min(max(campaign.ios_traffic_pct + self.rng.uniform(-0.01, 0.01), 0.10), 0.85)
-        if "tracking_drop" not in state.risk_events and self.rng.random() < (0.20 if state.difficulty == "hard" else 0.15):
+        if "tracking_drop" not in state.risk_events and self.rng.random() < (0.16 if state.difficulty == "hard" else 0.12):
             drop = self.rng.uniform(0.10, 0.16)
             effective_tracking_reliability = max(effective_tracking_reliability - drop, 0.15)
             state.risk_events.append("tracking_drop")
@@ -816,16 +919,15 @@ class SimulationEngine:
             for click_i in range(clicks):
                 if remaining_generation_cap <= 0:
                     break
-                seed = (day_seed * 131) + ((idx + 1) * 17) + (click_i * 7)
-                sample = _deterministic_bucket(seed)
+                sample = self.rng.random()
                 if sample < conversion_probability:
-                    delay_pick = _deterministic_bucket(seed * 3 + 11)
+                    delay_pick = self.rng.random()
                     delay = min_delay
                     cumulative = 0.0
                     weights = []
                     for d in range(delay_span):
                         delay_day = min_delay + d
-                        weight_noise = _deterministic_noise(seed + (d * 53), delay_jitter_amp)
+                        weight_noise = self.rng.uniform(-delay_jitter_amp, delay_jitter_amp)
                         weights.append(max(_delay_weight(delay_day) + weight_noise, 0.01))
                     weight_sum = sum(weights)
                     for d_idx, weight in enumerate(weights):
@@ -833,6 +935,11 @@ class SimulationEngine:
                         if delay_pick <= cumulative:
                             delay = min_delay + d_idx
                             break
+                    if self.rng.random() < 0.45:
+                        jitter = self.rng.choice([-1, 0, 1])
+                        if self.rng.random() < 0.18:
+                            jitter += self.rng.choice([-1, 1])
+                        delay = min(max(delay + jitter, min_delay), max_delay)
                     conversions_by_delay[delay] = conversions_by_delay.get(delay, 0) + 1
                     remaining_generation_cap -= 1
 
@@ -933,8 +1040,10 @@ class SimulationEngine:
                     state.risk_events.append("modeled_noise")
                     state.risk_events.append("modeled_overestimation")
 
-            if campaign.modeled_conversions_enabled and "modeled_noise" in state.risk_events and state.day <= 2:
-                distortion = self.rng.uniform(0.85, 1.15)
+            if campaign.modeled_conversions_enabled and "modeled_noise" in (state.risk_events + state.episode_rare_events):
+                distortion = self.rng.uniform(0.95, 1.05)
+                if not campaign.aem_enabled:
+                    distortion *= self.rng.uniform(0.95, 1.00)
                 modeled = max(int(round(modeled * distortion)), 0)
 
             campaign.reported_conversions += observed + modeled
@@ -983,6 +1092,17 @@ class SimulationEngine:
             and len(state.pending_delayed_conversions) > 3
             and not campaign.modeled_conversions_enabled
         )
+
+        budget_actions_taken = (
+            state.action_counts.get("reallocate_to_top_performers", 0)
+            + state.action_counts.get("pause_underperforming_adsets", 0)
+            + state.action_counts.get("adjust_budget_allocation", 0)
+        )
+        if budget_actions_taken > 0 and state.tracking_investigated and campaign.conversions_api_enabled:
+            compounding = min(0.01 * budget_actions_taken, 0.05)
+            state.budget_optimization_multiplier = min(state.budget_optimization_multiplier + compounding, 2.10)
+        elif budget_actions_taken == 0:
+            state.budget_optimization_multiplier = max(state.budget_optimization_multiplier - 0.01, 0.95)
 
         if not campaign.conversions_api_enabled and state.day >= 2:
             state.tracking_reliability = max(state.tracking_reliability - 0.015, 0.20)
@@ -1117,7 +1237,17 @@ def _materialize_observed_signals(
 
 
 def _diminishing_returns(action_count: int) -> float:
-    return 1.0 / (1.0 + 0.65 * max(action_count - 1, 0))
+    if action_count <= 1:
+        return 1.0
+    if action_count == 2:
+        return 0.62
+    if action_count == 3:
+        return 0.38
+    if action_count == 4:
+        return 0.16
+    if action_count == 5:
+        return 0.02
+    return -0.08
 
 
 def _redundancy_penalty(action_type: str, action_count: int) -> float:
@@ -1153,6 +1283,33 @@ def _is_converged(state: EnvState) -> bool:
         and roas_stable
         and len(unresolved_major) == 0
     )
+
+
+def _major_issues_resolved(state: EnvState) -> bool:
+    major = {"attribution_window", "conversions_api", "aem", "paused_bad_adsets", "budget_allocation"}
+    return len(major - set(state.issues_resolved)) == 0
+
+
+def _is_near_optimal(state: EnvState) -> bool:
+    c = state.campaign
+    return (
+        _attribution_gap(c) < 0.12
+        and state.tracking_reliability >= 0.90
+        and c.reported_roas >= 1.9
+        and _metrics_stable(state)
+    )
+
+
+def _metrics_stable(state: EnvState) -> bool:
+    if len(state.roas_history) < 2 or len(state.signal_quality_history) < 2:
+        return False
+    roas_delta = abs(state.roas_history[-1] - state.roas_history[-2])
+    sig_delta = abs(state.signal_quality_history[-1] - state.signal_quality_history[-2])
+    if len(state.attribution_gap_history) >= 2:
+        gap_delta = abs(state.attribution_gap_history[-1] - state.attribution_gap_history[-2])
+    else:
+        gap_delta = 0.02
+    return roas_delta < 0.03 and sig_delta < 0.01 and gap_delta < 0.01
 
 
 def _ordering_bonus(state: EnvState, action_type: str) -> float:

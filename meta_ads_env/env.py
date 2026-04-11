@@ -12,7 +12,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from meta_ads_env.models import Action, EnvState, Observation, Reward
-from meta_ads_env.simulator import SimulationEngine, WINDOW_COVERAGE, _attribution_gap
+from meta_ads_env.simulator import (
+    SimulationEngine,
+    WINDOW_COVERAGE,
+    _attribution_gap,
+    compute_pixel_quality,
+    compute_server_signal_quality,
+    compute_tracking_reliability,
+)
 from meta_ads_env.tasks import TASK_REGISTRY, get_task
 from meta_ads_env.grader import grade, TaskResult
 
@@ -66,6 +73,7 @@ class MetaAdsAttributionEnv:
     def reset(self) -> Observation:
         """Reset the environment to its initial state and return the first observation."""
         self._state = get_task(self.task_id)
+        self._apply_reset_randomization()
         c = self._state.campaign
         self._initial_gap      = _attribution_gap(c)
         self._initial_signal   = self._state.tracking_reliability
@@ -132,8 +140,13 @@ class MetaAdsAttributionEnv:
         true_c  = c.true_conversions
         rep_c   = c.reported_conversions
         gap_pct = _attribution_gap(c)
+        confidence = min(max(s.confidence_score, 0.0), 1.0)
+        obs_noise = 0.02 + (0.03 * (1.0 - confidence))
+        observed_gap = min(max(gap_pct + self._engine.rng.uniform(-obs_noise, obs_noise), 0.0), 1.0)
+        observed_signal = min(max(s.tracking_reliability + self._engine.rng.uniform(-obs_noise, obs_noise), 0.0), 1.0)
+        observed_ios = min(max(c.ios_traffic_pct + self._engine.rng.uniform(-0.03, 0.03), 0.0), 1.0)
         observed_factor = max(
-            WINDOW_COVERAGE.get(c.attribution_window, 0.72) * max(s.tracking_reliability, 0.10),
+            WINDOW_COVERAGE.get(c.attribution_window, 0.72) * max(observed_signal, 0.10),
             0.10,
         )
         inferred_true = int(rep_c / observed_factor)
@@ -158,14 +171,14 @@ class MetaAdsAttributionEnv:
             f"Simulation day: {s.day}\n"
             f"Spend: ${c.budget_spent:,.0f} / ${c.total_budget:,.0f}\n"
             f"Reported conversions: {rep_c} | Estimated true conversions: {inferred_true}\n"
-            f"Attribution gap: {gap_pct:.1%} of conversions are UNTRACKED\n"
+            f"Attribution gap (estimated): {observed_gap:.1%} of conversions are UNTRACKED\n"
             f"Attribution window: {c.attribution_window}\n"
-            f"Pixel signal quality: {c.pixel_signal_quality:.0%}  "
-            f"(iOS traffic: {c.ios_traffic_pct:.0%})\n"
+            f"Pixel signal quality (estimated): {min(max(c.pixel_signal_quality + self._engine.rng.uniform(-0.02, 0.02), 0.0), 1.0):.0%}  "
+            f"(iOS traffic est.: {observed_ios:.0%})\n"
             f"Pixel match quality: {c.pixel_match_quality:.0%} | CAPI coverage: {c.capi_coverage:.0%}\n"
             f"Server-side signal quality: {c.server_signal_quality:.0%}\n"
             f"Attribution confidence: {s.attribution_confidence:.0%}\n"
-            f"Tracking reliability (observability): {s.tracking_reliability:.0%}\n"
+            f"Tracking reliability (estimated observability): {observed_signal:.0%}\n"
             f"State confidence score: {s.confidence_score:.0%}\n"
             f"Tracking investigated: {'YES' if s.tracking_investigated else 'NO'} | "
             f"Uncertainty reintroduced: {'YES' if s.uncertainty_reintroduced else 'NO'}\n"
@@ -184,8 +197,10 @@ class MetaAdsAttributionEnv:
             f"Reported ROAS: {c.reported_roas:.2f}x  |  True ROAS: {c.true_roas:.2f}x\n"
             f"{adset_context}\n"
             f"Step {s.step_count}/{s.max_steps}\n"
-            f"Issues resolved: {s.issues_resolved}\n"
-            f"Issues remaining: {list(set(s.issues_remaining) - set(s.issues_resolved))}"
+            f"Diagnostic summary: signal_quality={observed_signal:.0%}, "
+            f"attribution_gap={observed_gap:.1%}, confidence={s.confidence_score:.0%}\n"
+            f"Operational health: budget_multiplier={s.budget_optimization_multiplier:.2f}, "
+            f"convergence_stagnation={s.convergence_stagnation_count}"
         )
 
         return Observation(
@@ -196,9 +211,9 @@ class MetaAdsAttributionEnv:
             campaign_data=c,
             reported_conversions=rep_c,
             estimated_true_conversions=inferred_true,
-            attribution_gap_pct=round(gap_pct, 4),
-            pixel_signal_quality=c.pixel_signal_quality,
-            ios_traffic_pct=c.ios_traffic_pct,
+            attribution_gap_pct=round(observed_gap, 4),
+            pixel_signal_quality=round(min(max(c.pixel_signal_quality + self._engine.rng.uniform(-0.02, 0.02), 0.0), 1.0), 4),
+            ios_traffic_pct=round(observed_ios, 4),
             budget_remaining=c.total_budget - c.budget_spent,
             roas_reported=c.reported_roas,
             roas_true=c.true_roas,
@@ -216,6 +231,43 @@ class MetaAdsAttributionEnv:
             available_actions=AVAILABLE_ACTIONS,
             context=context,
             done=s.done,
+        )
+
+    def _apply_reset_randomization(self) -> None:
+        if self._state is None:
+            return
+        s = self._state
+        c = s.campaign
+
+        ios_jitter = self._engine.rng.uniform(-0.05, 0.05)
+        c.ios_traffic_pct = min(max(c.ios_traffic_pct + ios_jitter, 0.10), 0.90)
+
+        base_gap = _attribution_gap(c)
+        gap_scale = self._engine.rng.uniform(0.90, 1.10)
+        target_gap = min(max(base_gap * gap_scale, 0.02), 0.92)
+        target_reported = int(round(c.true_conversions * (1.0 - target_gap)))
+        c.reported_conversions = min(max(target_reported, 0), c.true_conversions)
+        c.reported_cpa = round(c.budget_spent / c.reported_conversions, 2) if c.reported_conversions > 0 else 9999
+        c.true_cpa = round(c.budget_spent / c.true_conversions, 2) if c.true_conversions > 0 else 9999
+        c.reported_roas = round((c.reported_conversions * AVG_ORDER_VALUE) / c.budget_spent, 3) if c.budget_spent > 0 else 0.0
+        c.true_roas = round((c.true_conversions * AVG_ORDER_VALUE) / c.budget_spent, 3) if c.budget_spent > 0 else 0.0
+
+        c.pixel_signal_quality = compute_pixel_quality(
+            c.ios_traffic_pct,
+            c.conversions_api_enabled,
+            c.aem_enabled,
+            c.utm_tracking,
+        )
+        c.server_signal_quality = compute_server_signal_quality(
+            c.conversions_api_enabled,
+            c.aem_enabled,
+            c.utm_tracking,
+        )
+
+        signal_noise = self._engine.rng.uniform(-0.08, 0.08)
+        s.tracking_reliability = min(
+            max(compute_tracking_reliability(c, s.attribution_investigation_level) + signal_noise, 0.15),
+            0.98,
         )
 
     @staticmethod
