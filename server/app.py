@@ -174,7 +174,8 @@ def _reward_payload(reward) -> dict:
 
 @app.get("/")
 def root() -> RedirectResponse:
-    return RedirectResponse(url="/web", status_code=307)
+    # Use trailing slash to avoid an extra redirect hop by the mounted sub-app.
+    return RedirectResponse(url="/web/", status_code=307)
 
 
 @app.get("/health")
