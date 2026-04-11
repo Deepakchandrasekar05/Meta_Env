@@ -202,7 +202,7 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
         and campaign.modeled_conversions_enabled
         and not _has_active_underperformer(campaign)
     )
-    
+
     # Priority 1: Investigate signal uncertainty first.
     if (
         campaign.pixel_signal_quality < 0.7
@@ -224,7 +224,7 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
             parameters={"window": "7d_click"},
             reasoning="Attribution window too narrow, expanding to 7-day click"
         )
-    
+
     # Priority 2: Enable Conversions API if missing and high iOS traffic
     if not campaign.conversions_api_enabled and campaign.ios_traffic_pct > 0.30:
         return Action(
@@ -232,7 +232,7 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
             parameters={},
             reasoning="Enabling CAPI to recover iOS conversion signal"
         )
-    
+
     # Priority 3: Enable AEM if CAPI is on but AEM is off
     if campaign.conversions_api_enabled and not campaign.aem_enabled:
         return Action(
@@ -240,7 +240,7 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
             parameters={},
             reasoning="Enabling AEM for additional iOS privacy-safe tracking"
         )
-    
+
     # Priority 4: Switch to modeled reporting when lagged signals are high.
     if (obs.attribution_gap_pct > 0.35 or obs.pending_delayed_conversions > 0) and not campaign.modeled_conversions_enabled:
         return Action(
@@ -297,14 +297,18 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
                     parameters={"amount": 1200},
                     reasoning=f"One-time reallocation to {top_performer.adset_name} (ROAS {top_performer.true_roas:.2f}x)"
                 )
-    
+
     # Priority 8: Promote only after foundational attribution fixes.
     if stack_stable:
-        if action_history.count("promote_ad") < 2 and obs.delayed_conversion_release_events > 1:
+        if (
+            action_history.count("promote_ad") == 0
+            and obs.delayed_conversion_release_events > 1
+            and len(action_history) <= 6
+        ):
             return Action(
                 action_type="promote_ad",
                 parameters={},
-                reasoning="Scaling after attribution stack stabilization"
+                reasoning="Stack is stable and delayed conversions are releasing; promoting for controlled scale"
             )
 
     # Priority 9: Add UTM tracking if missing
@@ -314,7 +318,7 @@ def _rule_based_action(obs, task_id: str, action_history: List[str]) -> Optional
             parameters={},
             reasoning="Adding UTM tracking for better attribution"
         )
-    
+
     # If core issues are fixed (especially in hard), stop to avoid efficiency penalties.
     if _core_issues_fixed(campaign, action_history):
         return Action(
@@ -382,7 +386,7 @@ def _infer_next_action(client: OpenAI, model: str, observation_context: str, obs
         )
         content = completion.choices[0].message.content or ""
         llm_action = _parse_action(content)
-        
+
         # Guard against repetitive reallocation loops.
         if (
             llm_action.action_type == "reallocate_to_top_performers"
@@ -395,12 +399,12 @@ def _infer_next_action(client: OpenAI, model: str, observation_context: str, obs
             return llm_action
     except Exception:
         pass  # Fall through to rule-based
-    
+
     # LLM returned no_op or failed - use rule-based fallback
     rule_action = _rule_based_action(obs, task_id=task_id, action_history=action_history)
     if rule_action:
         return rule_action
-    
+
     # True no_op - all issues resolved
     return Action(action_type="no_op", parameters={}, reasoning="All issues resolved")
 
@@ -444,6 +448,11 @@ def run_task(client: OpenAI, task_id: str) -> int:
             action_history.append(action_str)
             steps_taken = step_num
             log_step(step=step_num, action=action_str, reward=reward_value, done=done, error=error)
+
+            # Stop early if agent confidently chooses no_op consecutively
+            if action_str == "no_op":
+                if len(action_history) >= 2 and action_history[-2] == "no_op":
+                    break
 
             if done:
                 break

@@ -7,11 +7,11 @@ from meta_ads_env.models import EnvState
 
 
 MAX_COMPONENTS = {
-    "attribution_accuracy": 0.35,
-    "signal_quality_gain":  0.25,
-    "roas_improvement":     0.25,
-    "action_validity":      0.10,
-    "step_efficiency":      0.05,
+    "attribution_accuracy": 0.40,
+    "signal_quality_gain":  0.28,
+    "roas_improvement":     0.28,
+    "action_validity":      0.03,
+    "step_efficiency":      0.01,
 }
 
 
@@ -58,6 +58,9 @@ def compute_episode_reward(
         max(final_state.step_count - final_state.optimal_steps, 0) / max(final_state.max_steps, 1),
         1.0,
     )
+    if final_state.step_count > final_state.optimal_steps:
+        overrun = final_state.step_count - final_state.optimal_steps
+        action_efficiency = max(action_efficiency - min(0.12 * overrun, 0.60), 0.0)
     redundancy_penalty = max(-penalise_trajectory(final_state.history), 0.0)
 
     # Weighted final score
@@ -67,7 +70,7 @@ def compute_episode_reward(
         + roas_ratio        * MAX_COMPONENTS["roas_improvement"]
         + issues_fraction   * MAX_COMPONENTS["action_validity"]
         + action_efficiency * MAX_COMPONENTS["step_efficiency"]
-        - redundancy_penalty * 0.05
+        - redundancy_penalty * 0.12
     )
 
     return round(min(max(score, 0.0), 1.0), 4)
@@ -88,6 +91,8 @@ def penalise_trajectory(history: List[dict]) -> float:
 
         if act == "no_op":
             penalty -= 0.05
+            if previous_action == "no_op":
+                penalty -= 0.03
 
         if act in seen_actions:
             penalty -= 0.02
@@ -95,7 +100,9 @@ def penalise_trajectory(history: List[dict]) -> float:
         if act == previous_action and act:
             repeated_streak += 1
             penalty -= 0.05
-            penalty -= min(0.01 * repeated_streak, 0.05)
+            penalty -= min(0.02 * repeated_streak, 0.10)
+            if repeated_streak >= 3:
+                penalty -= 0.15
         else:
             repeated_streak = 0
 

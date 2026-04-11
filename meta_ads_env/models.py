@@ -237,3 +237,8 @@ class EnvState(BaseModel):
     early_wrong_decision: bool = False
     recovered_after_wrong_decision: bool = False
     random_seed: int = 42
+    last_action_type: str = ""
+    repeated_action_count: int = 0
+    action_impact_memory: Dict[str, float] = Field(default_factory=dict)
+    convergence_stagnation_count: int = 0
+    episode_rare_events: List[str] = Field(default_factory=list)
